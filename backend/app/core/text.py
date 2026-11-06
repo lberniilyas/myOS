@@ -83,6 +83,87 @@ def name_match_score(mention: str, names: Iterable[str]) -> float:
     return best
 
 
+# Words a model may add or drop when it copies a quote without changing what it says
+# ("Oh and I paid 300" quoted as "I also paid 300"). Negations are never in this list.
+_QUOTE_FILLERS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "also",
+        "oh",
+        "so",
+        "then",
+        "um",
+        "uh",
+        "like",
+        "just",
+        "really",
+        "actually",
+        "too",
+        "well",
+        "i",
+        "et",
+        "aussi",
+        "puis",
+        "alors",
+        "euh",
+        "bon",
+        "donc",
+        "je",
+        "j",
+        "w",
+        "wa",
+        "ah",
+    }
+)
+CLOSE, PARTIAL, EXACT, NONE = "close", "partial", "exact", "none"
+
+
+def _most_in_order(needles: list[str], words: list[str], span: int) -> int:
+    """The most needles found in order inside any window of `span` consecutive words."""
+    best = 0
+    for start in range(len(words)):
+        found, position, end = 0, start, min(len(words), start + span)
+        for needle in needles:
+            try:
+                position = words.index(needle, position, end) + 1
+                found += 1
+            except ValueError:
+                continue
+        best = max(best, found)
+        if best == len(needles):
+            break
+    return best
+
+
+def evidence_match(text: str, quote: str) -> str:
+    """How well an evidence quote is supported by the message.
+
+    "exact": the quote occurs in the message. "close": it differs only in filler words.
+    "partial": most of its words occur in order, but something that may matter differs, so the
+    record deserves a confirmation. "none": it can't be traced to the message. A number in the
+    quote that isn't in the message always means "none".
+    """
+    if quote_appears_in(text, quote):
+        return EXACT
+    words = normalize_phrase(text).split()
+    quoted = normalize_phrase(quote).split()
+    if len(quoted) < 3:
+        return NONE
+    present = set(words)
+    if any(word not in present for word in quoted if any(ch.isdigit() for ch in word)):
+        return NONE
+    span = 2 * len(quoted) + 4
+    content = [word for word in quoted if word not in _QUOTE_FILLERS]
+    if content and _most_in_order(content, words, span) == len(content):
+        return CLOSE
+    if _most_in_order(quoted, words, span) / len(quoted) >= 0.6:
+        return PARTIAL
+    return NONE
+
+
 def quote_appears_in(text: str, quote: str) -> bool:
     """True when every fragment of an evidence quote occurs, in order, in the text.
 

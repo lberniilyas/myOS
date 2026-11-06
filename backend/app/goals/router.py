@@ -60,7 +60,13 @@ def _check_refs(db: Session, user: User, area_id, parent_goal_id, goal_id=None) 
     if parent_goal_id:
         if parent_goal_id == goal_id:
             raise ValidationFailedError("A goal can't be its own parent.")
-        get_owned(db, Goal, parent_goal_id, user.id, label="Parent goal")
+        parent = get_owned(db, Goal, parent_goal_id, user.id, label="Parent goal")
+        seen = set()
+        while parent.parent_goal_id is not None and parent.id not in seen:
+            if parent.parent_goal_id == goal_id:
+                raise ValidationFailedError("A goal can't sit under one of its own sub-goals.")
+            seen.add(parent.id)
+            parent = db.get(Goal, parent.parent_goal_id)
 
 
 @router.get("", response_model=list[GoalOut])

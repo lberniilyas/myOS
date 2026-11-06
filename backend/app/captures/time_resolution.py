@@ -6,10 +6,11 @@ an unstated start time stays unknown, an approximate duration stays approximate.
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from app.ai.extraction_schema import DayRef, DueRef, TimeChange, TimeInfo
 from app.core.enums import DayPeriod, DurationPrecision, TimePrecision
+from app.core.text import fold
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
@@ -82,6 +83,29 @@ def resolve_due(due: DueRef, today: date) -> date | None:
     return None
 
 
+# Words that place a clock time after noon, so "5" in them really is 17:00 (also 13-23h).
+_AFTERNOON_WORDS = re.compile(
+    r"(?<![a-z])p\.?\s?m\b|afternoon|evening|tonight|\bnight\b|soir|apres[ -]midi|3chiya|3achiya"
+    # A 24-hour clock ("17h", "17:00", "17h30"), not a number of minutes ("for 20 minutes").
+    r"|\blil\b|\blyl\b|\b(1[3-9]|2[0-3])\s*(h\b|h\d\d|:\d\d)"
+)
+# Words about something still to come, which must not be moved into the past.
+_FUTURE_WORDS = re.compile(
+    r"\b(will|going to|gonna|plan|planning|later|tomorrow|vais|va|allons|vont|demain|plus tard"
+    r"|ghadi|ghad|gha|ghda)\b|'ll\b"
+)
+
+
+def _elapsed(start: datetime, end: datetime) -> int:
+    """Real seconds between two local times, also across a daylight-saving change."""
+    return int((end.astimezone(UTC) - start.astimezone(UTC)).total_seconds())
+
+
+def _shifted(moment: datetime, seconds: int) -> datetime:
+    """The local time `seconds` of real time later (or earlier) than `moment`."""
+    return (moment.astimezone(UTC) + timedelta(seconds=seconds)).astimezone(moment.tzinfo)
+
+
 def parse_clock(value: str | None) -> time | None:
     if not value:
         return None
@@ -90,8 +114,9 @@ def parse_clock(value: str | None) -> time | None:
 
 
 def resolve_time(
-    info: TimeInfo, now_local: datetime, *, default_day: date | None = None
+    info: TimeInfo, now_local: datetime, *, default_day: date | None = None, said: str = ""
 ) -> ResolvedTime:
+    """said: the person's words for this record (its evidence), used to read ambiguous clocks."""
     zone = now_local.tzinfo
     today = now_local.date()
     warnings: list[str] = []
@@ -130,10 +155,31 @@ def resolve_time(
     )
     start = datetime.combine(day, start_clock, tzinfo=zone) if start_clock else None
     end = datetime.combine(day, end_clock, tzinfo=zone) if end_clock else None
+    words = fold(f"{info.expression or ''} {said}")
+    if (
+        start is not None
+        and day == today
+        and start > now_local + FUTURE_TOLERANCE
+        and start.hour >= 12
+        and info.part_of_day not in ("afternoon", "evening", "night")
+        and not _AFTERNOON_WORDS.search(words)
+        and not _FUTURE_WORDS.search(words)
+        # Only when the person said the 12-hour number ("5", "around 5:30") that became 17:xx.
+        and re.search(rf"(?<![\d:]){start.hour - 12}(?:[:h.]\d\d)?(?![\d:])", words)
+    ):
+        # "Around 5 I had a call" said at 11:00 is about 05:00; reading it as 17:00 would
+        # throw away something that already happened.
+        earlier = start - timedelta(hours=12)
+        warnings.append(
+            f"Read the time as {earlier:%H:%M}, because {start:%H:%M} hasn't come yet today."
+        )
+        start = earlier
+        if end is not None and end - timedelta(hours=12) > start:
+            end -= timedelta(hours=12)
     if start and end:
         if end <= start:
             end += timedelta(days=1)  # "from 11pm to 1am"
-        span = int((end - start).total_seconds())
+        span = _elapsed(start, end)
         if duration_seconds is not None and abs(duration_seconds - span) > max(600, 0.2 * span):
             warnings.append(
                 "The stated duration didn't match the start and end times; used the times."
@@ -141,9 +187,9 @@ def resolve_time(
         duration_seconds = span
         duration_precision = clock_duration_precision
     elif start and duration_seconds is not None:
-        end = start + timedelta(seconds=duration_seconds)
+        end = _shifted(start, duration_seconds)
     elif end and duration_seconds is not None:
-        start = end - timedelta(seconds=duration_seconds)
+        start = _shifted(end, -duration_seconds)
 
     in_future = False
     if start is not None and start > now_local + FUTURE_TOLERANCE:

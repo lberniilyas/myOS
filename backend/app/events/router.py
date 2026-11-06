@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai.provider import AIProvider, get_ai_provider
@@ -20,6 +20,7 @@ from app.events import service
 from app.events.models import Event, EventRevision
 from app.events.schemas import (
     CorrectionRequest,
+    DeletedEvent,
     EventCreate,
     EventDetail,
     EventUpdate,
@@ -69,6 +70,25 @@ def create_event(
     return service.to_detail(db, event, user.timezone)
 
 
+@router.get("/events/deleted", response_model=list[DeletedEvent])
+def list_deleted(
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[DeletedEvent]:
+    """Recently deleted entries, newest first, so a deletion can be undone."""
+    events = db.scalars(
+        select(Event)
+        .where(Event.user_id == user.id, Event.deleted_at.is_not(None))
+        .order_by(Event.deleted_at.desc())
+        .limit(limit)
+    )
+    return [
+        DeletedEvent(**service.to_summary(e, user.timezone).model_dump(), deleted_at=e.deleted_at)
+        for e in events
+    ]
+
+
 @router.get("/events/{event_id}", response_model=EventDetail)
 def read_event(
     event_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)
@@ -100,7 +120,18 @@ def delete_event(
 ) -> Response:
     event = get_owned(db, Event, event_id, user.id, label="Event", include_deleted=permanent)
     if permanent:
+        capture_id = event.capture_id
+        if event.deleted_at is None:
+            service.soft_delete(db, event, now=clock.now())  # reopens tasks, closes questions
         db.delete(event)
+        db.flush()
+        # "Permanent" includes the words you said, once no other entry comes from them.
+        if capture_id is not None and not db.scalar(
+            select(func.count(Event.id)).where(Event.capture_id == capture_id)
+        ):
+            capture = db.get(Capture, capture_id)
+            if capture is not None:
+                db.delete(capture)
     else:
         service.soft_delete(db, event, now=clock.now())
     db.commit()
@@ -109,12 +140,15 @@ def delete_event(
 
 @router.post("/events/{event_id}/restore", response_model=EventDetail)
 def restore_event(
-    event_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    event_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    clock: Clock = Depends(get_clock),
 ) -> EventDetail:
     event = get_owned(db, Event, event_id, user.id, label="Event", include_deleted=True)
     if event.deleted_at is None:
         raise ConflictError("This event isn't deleted.", code="NOT_DELETED")
-    service.restore(db, event)
+    service.restore(db, event, clock.now())
     db.commit()
     return service.to_detail(db, event, user.timezone)
 

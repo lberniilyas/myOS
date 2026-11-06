@@ -19,18 +19,19 @@ class TestAuth:
         )
         assert login.status_code == 200
 
-        refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+        old_refresh = {"refresh_token": tokens["refresh_token"]}
+        refreshed = client.post("/v1/auth/refresh", json=old_refresh)
         assert refreshed.status_code == 200
-        # The old tokens stop working after rotation.
+        # The old access token stops working after rotation.
         assert client.get("/v1/me", headers=headers(tokens)).status_code == 401
-        assert (
-            client.post(
-                "/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-            ).status_code
-            == 401
-        )
+        # The replaced refresh token still works until the next rotation, so a reply lost on a
+        # bad phone connection doesn't sign the person out...
+        retried = client.post("/v1/auth/refresh", json=old_refresh)
+        assert retried.status_code == 200
+        # ...and two rotations later it is gone.
+        assert client.post("/v1/auth/refresh", json=old_refresh).status_code == 401
 
-        new = refreshed.json()
+        new = retried.json()
         assert client.post("/v1/auth/logout", headers=headers(new)).status_code == 204
         assert client.get("/v1/me", headers=headers(new)).status_code == 401
 

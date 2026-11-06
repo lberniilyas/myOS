@@ -97,7 +97,7 @@ def resolve_project(mention: ProjectMention, ctx: ExtractionContext) -> ProjectR
             question=_project_choice(mention.text, [p for _, p in scored[:4]], learn_alias=True)
         )
 
-    name = mention.text.strip()
+    name = mention.text.strip()[:200]
     if not compact_key(name):
         return ProjectResolution()
     return ProjectResolution(

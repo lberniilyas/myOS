@@ -4,9 +4,10 @@
   --surface-2: #efede8;
   --ink: #1b1c1f;
   --ink-2: #5d6068;
-  --ink-3: #9a9ca3;
+  --ink-3: #65686f;
   --line: #e4e1da;
   --accent: #b5832f;
+  --accent-ink: #8a5c14;
   --accent-soft: #f3e8d4;
   --danger: #b3402e;
   --radius: 18px;
@@ -22,9 +23,10 @@
     --surface-2: #23252a;
     --ink: #f2f1ee;
     --ink-2: #a9acb3;
-    --ink-3: #6f727a;
+    --ink-3: #989ba3;
     --line: #2a2c31;
     --accent: #d6aa60;
+    --accent-ink: #d6aa60;
     --accent-soft: #2e2719;
     --danger: #e0735f;
   }
@@ -294,7 +296,7 @@ textarea.field {
 }
 
 .link {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 500;
 }
 
@@ -390,7 +392,7 @@ textarea.field {
 
 .understood li::before {
   content: "✓ ";
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* --- tab bar ---------------------------------------------------------------------------- */
@@ -439,7 +441,7 @@ textarea.field {
 }
 
 .back {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 16px;
   margin: 4px 0 8px;
 }
@@ -502,4 +504,89 @@ textarea.field {
   50% {
     box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 25%, transparent);
   }
+}
+
+/* --- management pages ------------------------------------------------------------------- */
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 28px 4px 10px;
+}
+
+.section-head h2 {
+  margin: 0;
+}
+
+.check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--ink-3);
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--bg);
+}
+
+.check.done {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.chip.selected {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.chip .remove {
+  margin-left: 6px;
+  color: var(--ink-3);
+}
+
+.row.editing {
+  flex-wrap: wrap;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.inline-actions > * {
+  flex: 1;
+}
+
+.field.compact {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.overdue {
+  color: var(--danger);
+}
+
+.notice {
+  padding: 14px 16px;
+}
+
+.notice + .notice {
+  border-top: 1px solid var(--line);
+}
+
+.notice .text {
+  margin: 0 0 8px;
+}
+
+.done-title {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+dl.card {
+  margin: 0;
 }

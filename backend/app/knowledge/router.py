@@ -12,7 +12,7 @@ from app.db.queries import get_owned
 from app.db.session import get_db
 from app.errors import ConflictError, ValidationFailedError
 from app.events.models import Event, EventKnowledge
-from app.events.service import to_summary
+from app.events.service import like_pattern, to_summary
 from app.knowledge import service
 from app.knowledge.models import Knowledge, KnowledgeAlias
 from app.knowledge.schemas import KnowledgeCreate, KnowledgeDetail, KnowledgeOut, KnowledgeUpdate
@@ -45,9 +45,13 @@ def list_knowledge(
 ) -> list[KnowledgeOut]:
     stmt = select(Knowledge).where(Knowledge.user_id == user.id, Knowledge.deleted_at.is_(None))
     if q and q.strip():
-        pattern = f"%{q.strip()}%"
-        alias_match = select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.ilike(pattern))
-        stmt = stmt.where(or_(Knowledge.title.ilike(pattern), Knowledge.id.in_(alias_match)))
+        pattern = like_pattern(q)
+        alias_match = select(KnowledgeAlias.knowledge_id).where(
+            KnowledgeAlias.alias.ilike(pattern, escape="\\")
+        )
+        stmt = stmt.where(
+            or_(Knowledge.title.ilike(pattern, escape="\\"), Knowledge.id.in_(alias_match))
+        )
     items = list(db.scalars(stmt.order_by(Knowledge.updated_at.desc()).limit(limit)))
     stats = service.evidence_stats(db, [k.id for k in items])
     return [_to_out(k, stats) for k in items]

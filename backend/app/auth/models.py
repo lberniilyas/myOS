@@ -38,6 +38,8 @@ class AuthSession(Base):
     )
     access_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    # The refresh token replaced by the last rotation; valid until the next one.
+    previous_refresh_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     access_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     device_name: Mapped[str | None] = mapped_column(String(200))

@@ -4,11 +4,12 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.core.enums import ProjectStatus, TaskStatus
+from app.core.fields import NonBlank
 from app.events.schemas import EntityRef, EventSummary, KnowledgeRef
 
 
 class ProjectCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: NonBlank = Field(max_length=200)
     description: str | None = None
     status: ProjectStatus = ProjectStatus.ACTIVE
     area_id: uuid.UUID | None = None
@@ -20,7 +21,7 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: NonBlank | None = Field(default=None, max_length=200)
     description: str | None = None
     status: ProjectStatus | None = None
     area_id: uuid.UUID | None = None
@@ -31,7 +32,7 @@ class ProjectUpdate(BaseModel):
 
 
 class AliasCreate(BaseModel):
-    alias: str = Field(min_length=1, max_length=200)
+    alias: NonBlank = Field(max_length=200)
 
 
 class ProjectOut(BaseModel):

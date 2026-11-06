@@ -14,6 +14,8 @@ from app.core.enums import (
     TimePrecision,
     UnderstandingState,
 )
+from app.core.fields import NonBlank
+from app.core.money import MAX_AMOUNT
 
 
 class EntityRef(BaseModel):
@@ -86,6 +88,10 @@ class EventDetail(EventSummary):
     related_event_count: int
 
 
+class DeletedEvent(EventSummary):
+    deleted_at: datetime
+
+
 class TimelinePage(BaseModel):
     items: list[EventSummary]
     next_cursor: str | None
@@ -95,7 +101,7 @@ class EventCreate(BaseModel):
     """Manual, structured entry for when precision matters (spec #5 §35)."""
 
     event_type: EventType
-    title: str = Field(min_length=1, max_length=300)
+    title: NonBlank = Field(max_length=300)
     description: str | None = None
     category: str | None = Field(default=None, max_length=64)
     occurred_on: date | None = None
@@ -103,7 +109,7 @@ class EventCreate(BaseModel):
     ended_at: datetime | None = None
     duration_minutes: float | None = Field(default=None, gt=0, le=24 * 60)
     duration_precision: DurationPrecision | None = None
-    amount: Decimal | None = Field(default=None, gt=0)
+    amount: Decimal | None = Field(default=None, gt=0, lt=MAX_AMOUNT)
     currency: str | None = None
     amount_precision: AmountPrecision | None = None
     structured_data: dict = Field(default_factory=dict)
@@ -115,7 +121,7 @@ class EventCreate(BaseModel):
 
 class EventUpdate(BaseModel):
     event_type: EventType | None = None
-    title: str | None = Field(default=None, min_length=1, max_length=300)
+    title: NonBlank | None = Field(default=None, max_length=300)
     description: str | None = None
     category: str | None = Field(default=None, max_length=64)
     occurred_on: date | None = None
@@ -124,7 +130,7 @@ class EventUpdate(BaseModel):
     duration_minutes: float | None = Field(default=None, gt=0, le=24 * 60)
     duration_precision: DurationPrecision | None = None
     time_precision: TimePrecision | None = None
-    amount: Decimal | None = Field(default=None, gt=0)
+    amount: Decimal | None = Field(default=None, gt=0, lt=MAX_AMOUNT)
     currency: str | None = None
     amount_precision: AmountPrecision | None = None
     structured_data: dict | None = None
@@ -136,7 +142,7 @@ class EventUpdate(BaseModel):
 
 
 class CorrectionRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=2000)
+    text: NonBlank = Field(max_length=2000)
 
 
 class RevisionOut(BaseModel):

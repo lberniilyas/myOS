@@ -67,6 +67,7 @@ export type CaptureResult = {
   events_updated: { event: EventSummary; changes: string[] }[];
   events_deleted: { id: string; title: string }[];
   tasks_created: { id: string; title: string; due_date: string | null }[];
+  tasks_completed?: { id: string; title: string }[];
   clarifications: Clarification[];
   warnings: string[];
   answer: { text: string } | null;
@@ -82,7 +83,13 @@ export type TimeRow = {
   events_without_duration: number;
 };
 
-export type MoneyRow = { currency: string | null; amount: string; display: string | null; events: number };
+export type MoneyRow = {
+  currency: string | null;
+  amount: string;
+  display: string | null;
+  events: number;
+  events_without_amount: number;
+};
 
 export type DailySummary = {
   date: string;
@@ -120,6 +127,49 @@ export type Project = {
 
 export type Habit = { id: string; name: string; frequency: string; target_count: number | null; status: string };
 export type Goal = { id: string; title: string; status: string; projects: EntityRef[] };
+
+export type ProjectDetail = Project & {
+  stats: {
+    total_seconds: number;
+    total_display: string | null;
+    last_7_days_seconds: number;
+    last_30_days_seconds: number;
+    event_count: number;
+    last_activity_on: string | null;
+  };
+  open_tasks: { id: string; title: string; status: string; due_date: string | null }[];
+  recent_events: EventSummary[];
+  knowledge: { id: string; title: string; understanding_state: string }[];
+};
+
+export type EvidenceTotal = { event_type: string; seconds: number; display: string | null; events: number };
+
+export type GoalDetail = Goal & {
+  description: string | null;
+  last_7_days: EvidenceTotal[];
+  last_30_days: EvidenceTotal[];
+  recent_evidence: EventSummary[];
+  open_task_count: number;
+};
+
+export type HabitDetail = Habit & {
+  current_period: { start: string; end: string; completed: number; missed: number; target_count: number | null };
+  recent: { event_id: string; occurred_on: string; title: string; outcome: string }[];
+};
+
+export type KnowledgeDetail = Knowledge & { first_encountered_on: string | null; evidence: EventSummary[] };
+
+export type CaptureListItem = {
+  id: string;
+  client_capture_id: string | null;
+  status: string;
+  text: string | null;
+  captured_at: string;
+  error_code: string | null;
+  attempts: number;
+};
+
+export type DeletedEvent = EventSummary & { deleted_at: string };
 export type Knowledge = {
   id: string;
   title: string;
@@ -128,4 +178,11 @@ export type Knowledge = {
   evidence_count: number;
   last_seen_on: string | null;
 };
-export type Task = { id: string; title: string; status: string; due_date: string | null; project: EntityRef | null };
+export type Task = {
+  id: string;
+  title: string;
+  status: string;
+  due_date: string | null;
+  completed_at: string | null;
+  project: EntityRef | null;
+};

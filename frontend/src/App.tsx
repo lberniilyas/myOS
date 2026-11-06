@@ -2,11 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, flushQueue, isSignedIn, pendingCaptures } from "./api";
 import { CaptureSheet, TabBar, Toast } from "./components";
+import { Deleted } from "./screens/Deleted";
 import { EventDetail } from "./screens/EventDetail";
+import { Goal } from "./screens/Goal";
+import { Habit } from "./screens/Habit";
 import { Home } from "./screens/Home";
 import { Insights } from "./screens/Insights";
+import { Knowledge } from "./screens/Knowledge";
 import { Login } from "./screens/Login";
 import { Me } from "./screens/Me";
+import { Project } from "./screens/Project";
+import { Tasks } from "./screens/Tasks";
 import { Timeline } from "./screens/Timeline";
 import type { User } from "./types";
 
@@ -71,16 +77,41 @@ export function App() {
 
   const [, section, param] = route.split("/");
   let screen;
-  if (section === "event" && param) screen = <EventDetail id={param} notify={setToast} onChanged={refresh} />;
-  else if (section === "timeline") screen = <Timeline refreshKey={refreshKey} />;
+  // Pages for managing things open from Me, so that tab stays highlighted on them.
+  let tab = section || "home";
+  if (section === "event" && param) {
+    screen = <EventDetail key={param} id={param} notify={setToast} onChanged={refresh} />;
+    tab = "timeline";
+  } else if (section === "project" && param) {
+    screen = <Project key={param} id={param} notify={setToast} />;
+    tab = "me";
+  } else if (section === "goal" && param) {
+    screen = <Goal key={param} id={param} notify={setToast} />;
+    tab = "me";
+  } else if (section === "habit" && param) {
+    screen = <Habit key={param} id={param} notify={setToast} />;
+    tab = "me";
+  } else if (section === "knowledge" && param) {
+    screen = <Knowledge key={param} id={param} notify={setToast} />;
+    tab = "me";
+  } else if (section === "deleted") {
+    screen = <Deleted notify={setToast} onChanged={refresh} />;
+    tab = "me";
+  } else if (section === "tasks") {
+    screen = <Tasks notify={setToast} />;
+    tab = "home";
+  } else if (section === "timeline") screen = <Timeline refreshKey={refreshKey} />;
   else if (section === "insights") screen = <Insights />;
   else if (section === "me") screen = <Me user={user} onUser={setUser} notify={setToast} />;
-  else screen = <Home user={user} onCapture={() => setCapturing(true)} refreshKey={refreshKey} notify={setToast} />;
+  else {
+    screen = <Home user={user} onCapture={() => setCapturing(true)} refreshKey={refreshKey} notify={setToast} />;
+    tab = "home";
+  }
 
   return (
     <div className="app">
       {screen}
-      <TabBar current={section === "event" ? "timeline" : section || "home"} />
+      <TabBar current={tab} />
       {capturing && <CaptureSheet language={user?.locale ?? "en"} onClose={() => setCapturing(false)} onSaved={refresh} />}
       {toast && <Toast text={toast} onDone={clearToast} />}
     </div>

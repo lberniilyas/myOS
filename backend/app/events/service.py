@@ -11,15 +11,19 @@ from sqlalchemy.orm import Session
 
 from app.areas.models import Area
 from app.auth.models import User
-from app.captures.models import Capture
+from app.captures.models import Capture, Clarification
 from app.clock import Clock
 from app.core.enums import (
+    OPEN_TASK_STATUSES,
+    CaptureStatus,
     ChangeSource,
+    ClarificationStatus,
     CreatedBy,
     DurationPrecision,
     LinkSource,
     RevisionChangeType,
     SourceType,
+    TaskStatus,
     TimePrecision,
 )
 from app.core.formatting import format_amount, format_duration
@@ -46,8 +50,8 @@ from app.events.schemas import (
     Provenance,
 )
 from app.goals.models import Goal
-from app.knowledge.models import Knowledge
-from app.projects.models import Project
+from app.knowledge.models import Knowledge, KnowledgeAlias
+from app.projects.models import Project, ProjectAlias
 from app.tasks.models import Task
 
 SNAPSHOT_FIELDS = (
@@ -402,8 +406,16 @@ def update_event(
         if ended_at is not None and ended_at.tzinfo is None:
             raise ValidationFailedError("ended_at needs a timezone offset.")
         event.ended_at = ended_at
-    if "duration_minutes" in changes:
-        minutes = changes["duration_minutes"]
+    minutes = changes.get("duration_minutes")
+    # An edit form that sends back the minutes it shows isn't a new measurement: "~2h" stays
+    # approximate unless the length or its precision really changed.
+    resent = (
+        minutes is not None
+        and event.duration_seconds is not None
+        and abs(round(minutes * 60) - event.duration_seconds) < 60
+        and not changes.get("duration_precision")
+    )
+    if "duration_minutes" in changes and not resent:
         event.duration_seconds = round(minutes * 60) if minutes else None
         event.duration_precision = (
             changes.get("duration_precision") or DurationPrecision.EXACT
@@ -417,7 +429,7 @@ def update_event(
     if event.occurred_at and event.ended_at:
         if event.ended_at < event.occurred_at:
             raise ValidationFailedError("ended_at must be after occurred_at.")
-        if "duration_minutes" not in changes and (
+        if ("duration_minutes" not in changes or resent) and (
             "ended_at" in changes or "occurred_at" in changes
         ):
             event.duration_seconds = int((event.ended_at - event.occurred_at).total_seconds())
@@ -429,6 +441,8 @@ def update_event(
             event.amount_precision = None
         elif event.amount_precision is None:
             event.amount_precision = changes.get("amount_precision") or "EXACT"
+        if amount is not None and event.currency is None and "currency" not in changes:
+            event.currency = user.default_currency  # decision #6: the profile's usual currency
     if "currency" in changes:
         event.currency = _currency_or_error(changes["currency"])
     if "amount_precision" in changes and changes["amount_precision"] and event.amount is not None:
@@ -475,9 +489,11 @@ def soft_delete(
         change_source=change_source,
         capture_id=capture_id,
     )
+    _reopen_tasks_it_completed(db, event)
+    _expire_questions_about(db, event, now)
 
 
-def restore(db: Session, event: Event) -> None:
+def restore(db: Session, event: Event, now: datetime) -> None:
     before = snapshot(event)
     event.deleted_at = None
     record_revision(
@@ -487,6 +503,59 @@ def restore(db: Session, event: Event) -> None:
         change_type=RevisionChangeType.RESTORE,
         change_source=ChangeSource.USER_EDIT,
     )
+    for link in event.task_links:
+        task = link.task
+        if link.link_source == LinkSource.AI and task.status in OPEN_TASK_STATUSES:
+            task.status = TaskStatus.COMPLETED
+            task.completed_at = event.ended_at or event.occurred_at or now
+
+
+def _reopen_tasks_it_completed(db: Session, event: Event) -> None:
+    """A task this event marked done is open again, unless another live entry also did it."""
+    for link in event.task_links:
+        task = link.task
+        if link.link_source != LinkSource.AI or task.status != TaskStatus.COMPLETED:
+            continue
+        also_done = db.scalar(
+            select(func.count(EventTask.event_id))
+            .join(Event, Event.id == EventTask.event_id)
+            .where(
+                EventTask.task_id == task.id,
+                Event.id != event.id,
+                Event.deleted_at.is_(None),
+            )
+        )
+        if not also_done:
+            task.status = TaskStatus.TODO
+            task.completed_at = None
+
+
+def _expire_questions_about(db: Session, event: Event, now: datetime) -> None:
+    """Open questions about a deleted entry no longer make sense."""
+    questions = db.scalars(
+        select(Clarification).where(
+            Clarification.event_id == event.id,
+            Clarification.status == ClarificationStatus.OPEN,
+        )
+    ).all()
+    for question in questions:
+        question.status = ClarificationStatus.EXPIRED
+        question.resolved_at = now
+    db.flush()
+    for capture_id in {q.capture_id for q in questions}:
+        still_open = db.scalar(
+            select(func.count(Clarification.id)).where(
+                Clarification.capture_id == capture_id,
+                Clarification.status == ClarificationStatus.OPEN,
+            )
+        )
+        capture = db.get(Capture, capture_id)
+        if (
+            not still_open
+            and capture is not None
+            and capture.processing_status == CaptureStatus.NEEDS_CLARIFICATION
+        ):
+            capture.processing_status = CaptureStatus.PROCESSED
 
 
 # --- timeline ------------------------------------------------------------------------------
@@ -514,12 +583,45 @@ def decode_cursor(cursor: str) -> tuple[date, datetime, uuid.UUID]:
         raise ValidationFailedError("Invalid cursor.") from exc
 
 
+def like_pattern(query: str) -> str:
+    """A LIKE pattern matching the words literally: % and _ typed by the person are not wildcards."""
+    escaped = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 def search_condition(query: str):
-    pattern = f"%{query.strip()}%"
+    """Events matching the words in their own fields, the person's original words, or the names
+    and nicknames of the projects and concepts they are linked to ("TenderPilot", "RAG")."""
+    pattern = like_pattern(query)
+
+    def like(column):
+        return column.ilike(pattern, escape="\\")
+
+    linked_project = (
+        select(EventProject.event_id)
+        .join(Project, Project.id == EventProject.project_id)
+        .outerjoin(ProjectAlias, ProjectAlias.project_id == Project.id)
+        .where(EventProject.event_id == Event.id, or_(like(Project.name), like(ProjectAlias.alias)))
+        .exists()
+    )
+    linked_knowledge = (
+        select(EventKnowledge.event_id)
+        .join(Knowledge, Knowledge.id == EventKnowledge.knowledge_id)
+        .outerjoin(KnowledgeAlias, KnowledgeAlias.knowledge_id == Knowledge.id)
+        .where(
+            EventKnowledge.event_id == Event.id,
+            or_(like(Knowledge.title), like(KnowledgeAlias.alias)),
+        )
+        .exists()
+    )
     return or_(
         Event.search_vector.op("@@")(func.websearch_to_tsquery("simple", query)),
-        Event.title.ilike(pattern),
-        Event.description.ilike(pattern),
+        like(Event.title),
+        like(Event.description),
+        like(Event.evidence),
+        like(Event.category),
+        linked_project,
+        linked_knowledge,
     )
 
 

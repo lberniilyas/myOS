@@ -1,8 +1,8 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.provider import AIProvider, get_ai_provider
@@ -23,6 +23,7 @@ from app.core.enums import CaptureStatus, ClarificationStatus
 from app.db.queries import get_owned
 from app.db.session import get_db
 from app.errors import ConflictError
+from app.events.models import Event
 from app.events.schemas import EventSummary
 from app.events.service import to_summary
 
@@ -44,6 +45,9 @@ def create_capture(
 @router.get("/captures", response_model=list[CaptureListItem])
 def list_captures(
     status: CaptureStatus | None = Query(default=None),
+    unfinished: bool = Query(
+        default=False, description="Only captures that failed or got stuck, to retry or remove."
+    ),
     limit: int = Query(default=30, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -51,16 +55,28 @@ def list_captures(
     stmt = select(Capture).where(Capture.user_id == user.id)
     if status:
         stmt = stmt.where(Capture.processing_status == status)
+    if unfinished:
+        stmt = stmt.where(
+            or_(
+                Capture.processing_status == CaptureStatus.FAILED,
+                and_(
+                    Capture.processing_status == CaptureStatus.PROCESSING,
+                    Capture.updated_at < func.now() - pipeline.STALE_PROCESSING,
+                ),
+            )
+        )
     captures = db.scalars(stmt.order_by(Capture.received_at.desc()).limit(limit))
     return [
         CaptureListItem(
             id=c.id,
+            client_capture_id=c.client_capture_id,
             status=c.processing_status,
             input_type=c.input_type,
             text=c.text,
             captured_at=c.captured_at,
             response_text=c.response_text,
             error_code=c.error_code,
+            attempts=c.attempts,
         )
         for c in captures
     ]
@@ -89,6 +105,21 @@ def retry_capture(
     return pipeline.process_capture(db, user, capture, ai, clock)
 
 
+@router.delete("/captures/{capture_id}", status_code=204)
+def delete_capture(
+    capture_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Response:
+    """Erase a message that never became entries (one that failed, say), words included."""
+    capture = get_owned(db, Capture, capture_id, user.id, label="Capture")
+    if db.scalar(select(func.count(Event.id)).where(Event.capture_id == capture.id)):
+        raise ConflictError(
+            "This message created entries; delete those entries instead.", code="HAS_ENTRIES"
+        )
+    db.delete(capture)
+    db.commit()
+    return Response(status_code=204)
+
+
 @router.get("/clarifications", response_model=list[ClarificationOut])
 def list_clarifications(
     status: ClarificationStatus = Query(default=ClarificationStatus.OPEN),
@@ -97,7 +128,12 @@ def list_clarifications(
 ) -> list[ClarificationOut]:
     stmt = (
         select(Clarification)
-        .where(Clarification.user_id == user.id, Clarification.status == status)
+        .where(
+            Clarification.user_id == user.id,
+            Clarification.status == status,
+            # Questions about entries deleted since they were asked are moot.
+            ~exists().where(Event.id == Clarification.event_id, Event.deleted_at.is_not(None)),
+        )
         .order_by(Clarification.created_at.desc())
         .limit(50)
     )

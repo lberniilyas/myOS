@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import DataError, StatementError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.analytics.router import router as summary_router
@@ -88,6 +89,18 @@ def create_app() -> FastAPI:
         code = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}.get(exc.status_code, "HTTP_ERROR")
         return _error(exc.status_code, code, str(exc.detail))
 
+    @app.exception_handler(DataError)
+    async def bad_data(_: Request, exc: DataError) -> JSONResponse:
+        # Values PostgreSQL refuses to store (a number out of range, say) are the client's error.
+        logger.info("Rejected data: %s", type(exc.orig).__name__)
+        return _error(422, "VALIDATION_FAILED", "Some values are out of range or invalid.")
+
+    @app.exception_handler(StatementError)
+    async def bad_statement(request: Request, exc: StatementError) -> JSONResponse:
+        if isinstance(exc.orig, ValueError) and "NUL" in str(exc.orig):
+            return _error(422, "VALIDATION_FAILED", "Text can't contain NUL characters.")
+        return await unexpected(request, exc)
+
     @app.exception_handler(Exception)
     async def unexpected(_: Request, exc: Exception) -> JSONResponse:
         logger.exception("Unhandled error", exc_info=exc)
@@ -119,6 +132,9 @@ def create_app() -> FastAPI:
 
         @app.get("/{path:path}", include_in_schema=False)
         def frontend(path: str) -> FileResponse:
+            if path == "v1" or path.startswith("v1/"):
+                # An unknown API path is a 404 the client can read, not the web app's page.
+                raise StarletteHTTPException(status_code=404, detail="Not found.")
             candidate = (FRONTEND_DIST / path).resolve()
             if path and candidate.is_file() and FRONTEND_DIST in candidate.parents:
                 return FileResponse(candidate)

@@ -189,9 +189,32 @@ def answer_clarification(
             ctx = build_context(db, user, capture)
             ctx.events = {"e1": target}
             planner = Planner(db, ctx)
-            planner.apply_correction(target, correction)
+            planner.apply_correction(target, correction, confirmed=True)
             applied = apply_plan(db, capture, planner.plan, now)
             message = "Done." if not applied.warnings else applied.warnings[0]
+        elif kind == ClarificationKind.CONFIRM and value == "remove":
+            removed = []
+            ids = (clarification.payload or {}).get("event_ids") or [str(clarification.event_id)]
+            for event_id in ids:
+                target = db.get(Event, uuid.UUID(event_id))
+                if target is None or target.user_id != user.id or target.deleted_at is not None:
+                    continue
+                soft_delete(
+                    db,
+                    target,
+                    change_source=ChangeSource.CLARIFICATION,
+                    capture_id=clarification.capture_id,
+                    now=now,
+                )
+                removed.append(target.title)
+            message = f"Removed {', '.join(removed)}." if removed else "Nothing left to remove."
+        elif kind == ClarificationKind.CONFIRM:
+            if event is not None:
+                event.structured_data = {
+                    **(event.structured_data or {}),
+                    "evidence_check": "confirmed",
+                }
+            message = "Kept it."
         else:
             message = "Okay, left it as it is."
 

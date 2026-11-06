@@ -108,9 +108,11 @@ class CaptureResult(BaseModel):
 
 class CaptureListItem(BaseModel):
     id: uuid.UUID
+    client_capture_id: uuid.UUID | None
     status: CaptureStatus
     input_type: InputType
     text: str | None
     captured_at: datetime
     response_text: str | None
     error_code: str | None
+    attempts: int

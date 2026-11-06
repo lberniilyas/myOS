@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
 import { EventRow } from "../components";
-import { dayHeading, localToday } from "../format";
+import { dayHeading, localToday, whenLabel } from "../format";
 import type { EventSummary } from "../types";
 
 type Page = { items: EventSummary[]; next_cursor: string | null };
@@ -12,18 +12,25 @@ export function Timeline({ refreshKey }: { refreshKey: number }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const latest = useRef(0);
 
   async function load(reset: boolean, search = query) {
+    const request = ++latest.current;
     setLoading(true);
     const params = new URLSearchParams({ limit: "40" });
     if (search.trim()) params.set("q", search.trim());
     if (!reset && cursor) params.set("cursor", cursor);
     try {
       const page = await api<Page>(`/v1/timeline?${params}`);
+      if (request !== latest.current) return; // a newer search already answered
       setItems((current) => (reset ? page.items : [...current, ...page.items]));
       setCursor(page.next_cursor);
+      setFailed(false);
+    } catch {
+      if (request === latest.current) setFailed(true);
     } finally {
-      setLoading(false);
+      if (request === latest.current) setLoading(false);
     }
   }
 
@@ -50,12 +57,20 @@ export function Timeline({ refreshKey }: { refreshKey: number }) {
           <h2>{dayHeading(day, today)}</h2>
           <div className="card">
             {events.map((event) => (
-              <EventRow key={event.id} event={event} />
+              <EventRow key={event.id} event={event} showTime={events.some((e) => whenLabel(e))} />
             ))}
           </div>
         </div>
       ))}
-      {!loading && items.length === 0 && (
+      {failed && (
+        <div className="card empty">
+          Can't reach your system right now.{" "}
+          <button className="link" onClick={() => load(items.length === 0)}>
+            Try again
+          </button>
+        </div>
+      )}
+      {!loading && !failed && items.length === 0 && (
         <div className="empty">{query ? "Nothing matches that." : "Your timeline fills up as you tell your system what happened."}</div>
       )}
       {cursor && (

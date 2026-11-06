@@ -72,6 +72,59 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
   );
 }
 
+export function BackButton() {
+  return (
+    <button className="back" onClick={() => history.back()}>
+      ‹ Back
+    </button>
+  );
+}
+
+/** A destructive action that needs a second, deliberate tap. */
+export function ConfirmButton({
+  label,
+  confirmLabel,
+  question,
+  onConfirm,
+  disabled = false,
+}: {
+  label: string;
+  confirmLabel: string;
+  question: string;
+  onConfirm: () => void;
+  disabled?: boolean;
+}) {
+  const [asking, setAsking] = useState(false);
+  if (!asking) {
+    return (
+      <button className="button danger" onClick={() => setAsking(true)} disabled={disabled}>
+        {label}
+      </button>
+    );
+  }
+  return (
+    <div className="card question">
+      <p>{question}</p>
+      <div className="inline-actions">
+        <button className="button secondary" onClick={() => setAsking(false)}>
+          Cancel
+        </button>
+        <button
+          className="button"
+          style={{ background: "var(--danger)" }}
+          disabled={disabled}
+          onClick={() => {
+            setAsking(false);
+            onConfirm();
+          }}
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Toast({ text, onDone }: { text: string; onDone: () => void }) {
   useEffect(() => {
     const timer = setTimeout(onDone, 3200);
@@ -183,11 +236,35 @@ function understoodLines(result: CaptureResult): string[] {
   result.events_updated.forEach((u) => lines.push(`${u.event.title} — updated ${u.changes.join(", ")}`));
   result.events_deleted.forEach((d) => lines.push(`${d.title} — removed`));
   result.tasks_created.forEach((t) => lines.push(`Task: ${t.title}${t.due_date ? ` (due ${t.due_date})` : ""}`));
+  result.tasks_completed?.forEach((t) => lines.push(`Task done: ${t.title}`));
   return lines;
 }
 
+const DRAFT_KEY = "pos.capture-draft";
+
+function readDraft(): string {
+  try {
+    return localStorage.getItem(DRAFT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeDraft(text: string): void {
+  try {
+    if (text) localStorage.setItem(DRAFT_KEY, text);
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* storage unavailable: the draft lasts while the sheet is open */
+  }
+}
+
 export function CaptureSheet({ onClose, onSaved, language }: { onClose: () => void; onSaved: () => void; language: string }) {
-  const [text, setText] = useState("");
+  const [text, setTextState] = useState(readDraft);
+  const setText = (value: string) => {
+    setTextState(value);
+    writeDraft(value);
+  };
   const [listening, setListening] = useState(false);
   const [usedVoice, setUsedVoice] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -235,6 +312,7 @@ export function CaptureSheet({ onClose, onSaved, language }: { onClose: () => vo
     setError(null);
     try {
       const saved = await sendCapture(text.trim(), usedVoice ? "VOICE" : "TEXT");
+      writeDraft(""); // it is on the server or in the send queue now
       if (saved === null) setOffline(true);
       else setResult(saved);
       onSaved();

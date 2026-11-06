@@ -18,7 +18,7 @@ from app.core.periods import Period, resolve_period
 from app.core.text import name_match_score
 from app.errors import AppError
 from app.events.models import Event, EventProject
-from app.events.service import search_condition
+from app.events.service import like_pattern, search_condition
 from app.habits.models import Habit
 from app.knowledge import service as knowledge_service
 from app.knowledge.models import Knowledge, KnowledgeAlias
@@ -279,11 +279,13 @@ class AssistantTools:
             Knowledge.user_id == self.user.id, Knowledge.deleted_at.is_(None)
         )
         if args.text and args.text.strip():
-            pattern = f"%{args.text.strip()}%"
+            pattern = like_pattern(args.text)
             alias_ids = select(KnowledgeAlias.knowledge_id).where(
-                KnowledgeAlias.alias.ilike(pattern)
+                KnowledgeAlias.alias.ilike(pattern, escape="\\")
             )
-            stmt = stmt.where(or_(Knowledge.title.ilike(pattern), Knowledge.id.in_(alias_ids)))
+            stmt = stmt.where(
+                or_(Knowledge.title.ilike(pattern, escape="\\"), Knowledge.id.in_(alias_ids))
+            )
         items = self.db.scalars(stmt.order_by(Knowledge.updated_at.desc()).limit(50)).all()
         stats = knowledge_service.evidence_stats(self.db, [k.id for k in items])
         result = []

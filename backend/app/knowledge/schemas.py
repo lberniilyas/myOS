@@ -4,11 +4,12 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.core.enums import KnowledgeType, UnderstandingState
+from app.core.fields import NonBlank
 from app.events.schemas import EventSummary
 
 
 class KnowledgeCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
+    title: NonBlank = Field(max_length=300)
     description: str | None = None
     knowledge_type: KnowledgeType = KnowledgeType.CONCEPT
     understanding_state: UnderstandingState = UnderstandingState.ENCOUNTERED
@@ -16,7 +17,7 @@ class KnowledgeCreate(BaseModel):
 
 
 class KnowledgeUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=300)
+    title: NonBlank | None = Field(default=None, max_length=300)
     description: str | None = None
     knowledge_type: KnowledgeType | None = None
     understanding_state: UnderstandingState | None = None

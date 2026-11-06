@@ -5,12 +5,13 @@ const TOKENS_KEY = "pos.tokens";
 type Tokens = { access_token: string; refresh_token: string };
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-  ) {
+  status: number;
+  code: string;
+
+  constructor(status: number, code: string, message: string) {
     super(message);
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -34,25 +35,31 @@ export function saveTokens(tokens: Tokens | null): void {
 
 export const isSignedIn = (): boolean => readTokens() !== null;
 
-let refreshing: Promise<boolean> | null = null;
+type RefreshOutcome = "renewed" | "refused" | "unreachable";
+let refreshing: Promise<RefreshOutcome> | null = null;
 
-async function refresh(): Promise<boolean> {
+/** Renew the session. Only a refresh token the server refuses ends it: a dropped connection,
+ * a sleeping server or a 5xx leaves the person signed in, to try again later. */
+async function refresh(): Promise<RefreshOutcome> {
   const tokens = readTokens();
-  if (!tokens) return false;
+  if (!tokens) return "refused";
   refreshing ??= fetch("/v1/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: tokens.refresh_token }),
   })
-    .then(async (response) => {
-      if (!response.ok) {
-        saveTokens(null);
-        return false;
+    .then(async (response): Promise<RefreshOutcome> => {
+      if (response.ok) {
+        saveTokens(await response.json());
+        return "renewed";
       }
-      saveTokens(await response.json());
-      return true;
+      if (response.status === 401) {
+        saveTokens(null);
+        return "refused";
+      }
+      return "unreachable";
     })
-    .catch(() => false)
+    .catch((): RefreshOutcome => "unreachable")
     .finally(() => {
       refreshing = null;
     });
@@ -69,7 +76,11 @@ export async function api<T>(path: string, options: { method?: string; body?: un
     return fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   };
   let response = await send();
-  if (response.status === 401 && auth && (await refresh())) response = await send();
+  if (response.status === 401 && auth) {
+    const outcome = await refresh();
+    if (outcome === "renewed") response = await send();
+    else if (outcome === "unreachable") throw new ApiError(503, "UNREACHABLE", "Can't reach your system right now.");
+  }
   if (response.status === 401 && auth) {
     saveTokens(null);
     window.dispatchEvent(new Event("pos:signed-out"));

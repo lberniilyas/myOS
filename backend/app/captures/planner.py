@@ -55,10 +55,14 @@ from app.core.enums import (
 )
 from app.core.formatting import format_amount, format_duration
 from app.core.money import normalize_currency, parse_amount
-from app.core.text import mention_key, quote_appears_in
+from app.core.text import NONE, PARTIAL, evidence_match, mention_key
 from app.events.models import Event
 
 MAX_QUESTIONS = 3
+# One message may remove this many records without a confirmation; more needs a "yes".
+MAX_SILENT_DELETES = 2
+# Below this, the model itself isn't sure it was asked to delete, so ask first.
+CONFIDENT_DELETE = 0.6
 
 
 @dataclass
@@ -109,6 +113,8 @@ class ChangePlan:
     questions: list[QuestionPlan] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     question_text: str | None = None
+    # Deletions held back until the person confirms them.
+    deletes_to_confirm: list[Event] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (self.new_events or self.updates or self.deletes or self.new_tasks)
@@ -140,12 +146,15 @@ class Planner:
             else SourceType.USER_TEXT
         )
         self._temp_ids = 0
+        # Events this plan replaces (a split), which new events must not be compared with.
+        self._replacing: set[uuid.UUID] = set()
 
     # --- entry point -----------------------------------------------------------------------
 
     def run(self, output: ExtractionOutput) -> ChangePlan:
         for correction in output.corrections:
             self.plan_correction(correction)
+        self._hold_back_bulk_deletes()
         for extracted in output.events:
             self.plan_event(extracted)
         for task in output.tasks:
@@ -155,18 +164,22 @@ class Planner:
         self._cap_questions()
         return self.plan
 
-    def _evidence_ok(self, evidence: str, what: str) -> bool:
-        if evidence and quote_appears_in(self.text, evidence):
-            return True
-        self.plan.warnings.append(f"Skipped “{what}” because it couldn't be traced to your words.")
-        return False
+    def _evidence(self, evidence: str, what: str) -> str | None:
+        """How well the quote matches the message, or None (with a warning) when it doesn't."""
+        level = evidence_match(self.text, evidence) if evidence else NONE
+        if level == NONE:
+            self.plan.warnings.append(
+                f"Skipped “{what}” because it couldn't be traced to your words."
+            )
+            return None
+        return level
 
     def _cap_questions(self) -> None:
         budget = MAX_QUESTIONS
-        holders = [p.questions for p in self.plan.new_events] + [
-            u.questions for u in self.plan.updates
-        ]
-        holders.append(self.plan.questions)
+        # Questions about the message as a whole (which entry, delete these?) come first.
+        holders = [self.plan.questions]
+        holders += [p.questions for p in self.plan.new_events]
+        holders += [u.questions for u in self.plan.updates]
         for questions in holders:
             keep = questions[:budget]
             budget -= len(keep)
@@ -176,9 +189,12 @@ class Planner:
 
     def plan_event(self, extracted: ExtractedEvent, *, default_day=None) -> NewEventPlan | None:
         title = extracted.title.strip()[:300] or extracted.event_type.replace("_", " ").title()
-        if not self._evidence_ok(extracted.evidence, title):
+        evidence = self._evidence(extracted.evidence, title)
+        if evidence is None:
             return None
-        resolved = resolve_time(extracted.time, self.now_local, default_day=default_day)
+        resolved = resolve_time(
+            extracted.time, self.now_local, default_day=default_day, said=extracted.evidence
+        )
         self.plan.warnings.extend(f"{title}: {w}" for w in resolved.warnings)
         if resolved.in_future:
             self.plan.warnings.append(
@@ -203,8 +219,29 @@ class Planner:
         if resolved.date_unclear:
             plan.questions.append(self._date_question(title))
         self._check_duplicate(plan, event_type)
+        if evidence == PARTIAL:
+            # Saved, so nothing is lost, but the words only partly support it: ask first of all.
+            values["structured_data"]["evidence_check"] = "partial"
+            plan.questions.insert(0, self._keep_question(values))
         self.plan.new_events.append(plan)
         return plan
+
+    def _keep_question(self, values: dict) -> QuestionPlan:
+        shown = values["title"]
+        detail = format_amount(
+            values["amount"], values["currency"], values["amount_precision"]
+        ) or format_duration(values["duration_seconds"], values["duration_precision"])
+        if detail:
+            shown = f"{shown} — {detail}"
+        return QuestionPlan(
+            kind=ClarificationKind.CONFIRM,
+            question=f"I wasn't sure about this one. Keep “{shown}”?",
+            options=[
+                {"id": "keep", "label": "Keep it", "value": "keep"},
+                {"id": "remove", "label": "Remove it", "value": "remove"},
+            ],
+            payload={"reason": "evidence"},
+        )
 
     def _next_temp_id(self) -> str:
         self._temp_ids += 1
@@ -388,8 +425,11 @@ class Planner:
             )
         ).all()
         project_ids = {project_id for project_id, _ in plan.project_links}
+        leaving = self._replacing | {d.event.id for d in self.plan.deletes}
         best, best_score = None, 0.0
         for existing in candidates:
+            if existing.id in leaving:
+                continue
             score = duplicate_score(
                 event_type=event_type,
                 title=values["title"],
@@ -492,8 +532,42 @@ class Planner:
 
     # --- corrections ---------------------------------------------------------------------
 
+    def _hold_back_bulk_deletes(self) -> None:
+        """Removing many records at once, or on a hunch, waits for a yes (spec #4 §44)."""
+        plain = [d for d in self.plan.deletes if d.change_type == RevisionChangeType.DELETE]
+        if len(plain) > MAX_SILENT_DELETES:
+            self.plan.deletes = [d for d in self.plan.deletes if d not in plain]
+            self.plan.deletes_to_confirm += [d.event for d in plain]
+        targets = list({event.id: event for event in self.plan.deletes_to_confirm}.values())
+        if not targets:
+            return
+        if len(targets) == 1:
+            question = f"Delete “{_event_label(targets[0])}”?"
+        else:
+            shown = ", ".join(e.title for e in targets[:5]) + ("…" if len(targets) > 5 else "")
+            question = f"Delete these {len(targets)} entries: {shown}?"
+        self.plan.questions.insert(
+            0,
+            QuestionPlan(
+                kind=ClarificationKind.CONFIRM,
+                question=question,
+                options=[
+                    {"id": "remove", "label": "Delete", "value": "remove"},
+                    {"id": "keep", "label": "Keep", "value": "keep"},
+                ],
+                payload={"reason": "delete", "event_ids": [str(e.id) for e in targets]},
+            ),
+        )
+
     def plan_correction(self, correction: Correction) -> None:
-        if not self._evidence_ok(correction.evidence, "correction"):
+        evidence = self._evidence(correction.evidence, "correction")
+        if evidence is None:
+            return
+        if evidence == PARTIAL:
+            # Changing or removing a saved record needs the person's own words, not a guess.
+            self.plan.warnings.append(
+                "I didn't change anything because I wasn't sure what you meant."
+            )
             return
         target = self.ctx.events.get(correction.target_ref) if correction.target_ref else None
         if target is None:
@@ -522,11 +596,18 @@ class Planner:
                 return
         self.apply_correction(target, correction)
 
-    def apply_correction(self, target: Event, correction: Correction) -> None:
+    def apply_correction(
+        self, target: Event, correction: Correction, *, confirmed: bool = False
+    ) -> None:
+        """confirmed: the person already picked this entry in answer to a question."""
         if correction.action == "delete":
-            self.plan.deletes.append(DeletePlan(target))
+            if confirmed or correction.confidence >= CONFIDENT_DELETE:
+                self.plan.deletes.append(DeletePlan(target))
+            else:
+                self.plan.deletes_to_confirm.append(target)
             return
         if correction.action == "split":
+            self._replacing.add(target.id)
             planned = [
                 self.plan_event(item, default_day=target.occurred_on)
                 for item in correction.split_into
@@ -643,7 +724,8 @@ class Planner:
 
     def plan_task(self, task: ExtractedTask) -> None:
         title = task.title.strip()[:500]
-        if not title or not self._evidence_ok(task.evidence, title):
+        # A partly matching task is kept: it is only an intention, easy to see and remove.
+        if not title or self._evidence(task.evidence, title) is None:
             return
         key = mention_key(title)
         for existing in self.ctx.tasks.values():

@@ -146,6 +146,8 @@ def update_habit(
     if changes.get("name"):
         habit.name = changes["name"].strip()
         habit.name_key = _unique_key(db, user, habit.name, habit.id)
+    if changes.get("area_id"):
+        get_owned(db, Area, changes["area_id"], user.id, label="Area")
     for field in ("description", "frequency", "target_count", "area_id"):
         if field in changes and not (field == "frequency" and changes[field] is None):
             setattr(habit, field, changes[field])

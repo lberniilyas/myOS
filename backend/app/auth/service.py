@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.areas.models import Area
@@ -91,11 +91,25 @@ def login(
 
 
 def refresh(db: Session, refresh_token: str, clock: Clock) -> tuple[User, IssuedTokens]:
-    """Rotate both tokens; the presented refresh token stops working immediately."""
+    """Rotate both tokens.
+
+    The refresh token being replaced keeps working until the next rotation: on a phone the reply
+    carrying the new one can be lost (bad signal, app suspended), and the old one must still get
+    the person back in rather than signing them out. The row lock makes concurrent refreshes take
+    turns, so each one leaves the other's token valid.
+    """
     settings = get_settings()
     now = clock.now()
+    presented = hash_token(refresh_token)
     session = db.scalar(
-        select(AuthSession).where(AuthSession.refresh_token_hash == hash_token(refresh_token))
+        select(AuthSession)
+        .where(
+            or_(
+                AuthSession.refresh_token_hash == presented,
+                AuthSession.previous_refresh_token_hash == presented,
+            )
+        )
+        .with_for_update()
     )
     if session is None or session.revoked_at is not None or session.refresh_expires_at <= now:
         raise UnauthorizedError(
@@ -104,6 +118,7 @@ def refresh(db: Session, refresh_token: str, clock: Clock) -> tuple[User, Issued
     access_token = new_token("pos_at")
     new_refresh_token = new_token("pos_rt")
     session.access_token_hash = hash_token(access_token)
+    session.previous_refresh_token_hash = session.refresh_token_hash
     session.refresh_token_hash = hash_token(new_refresh_token)
     session.access_expires_at = now + timedelta(minutes=settings.access_token_ttl_minutes)
     session.refresh_expires_at = now + timedelta(days=settings.refresh_token_ttl_days)

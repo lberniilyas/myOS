@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, saveTokens } from "../api";
-import type { Goal, Habit, Knowledge, Project, User } from "../types";
+import { navigate } from "../components";
+import { UNDERSTANDING } from "../format";
+import type { Goal, Habit, Knowledge, Project, Task, User } from "../types";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -9,6 +11,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h2>{title}</h2>
       <div className="card">{children}</div>
     </>
+  );
+}
+
+function OpenRow({ to, label, sub, value }: { to: string; label: string; sub?: string; value?: string }) {
+  return (
+    <button className="row" onClick={() => navigate(to)}>
+      <span className="label">
+        {label}
+        {sub && <span className="sub">{sub}</span>}
+      </span>
+      {value && <span className="faint">{value}</span>}
+      <span className="faint" aria-hidden="true">
+        ›
+      </span>
+    </button>
   );
 }
 
@@ -46,6 +63,7 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
   const [goals, setGoals] = useState<Goal[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
+  const [openTasks, setOpenTasks] = useState<Task[]>([]);
   const [password, setPassword] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -54,6 +72,7 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
     api<Goal[]>("/v1/goals").then(setGoals).catch(() => undefined);
     api<Habit[]>("/v1/habits").then(setHabits).catch(() => undefined);
     api<Knowledge[]>("/v1/knowledge?limit=50").then(setKnowledge).catch(() => undefined);
+    api<Task[]>("/v1/tasks?open_only=true").then(setOpenTasks).catch(() => undefined);
   }
 
   useEffect(load, []);
@@ -100,7 +119,9 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
       <h1>Me</h1>
 
       {user && (
-        <Section title="Profile">
+        <>
+          <h2>Profile</h2>
+          <dl className="card">
           <div className="kv">
             <dt>Email</dt>
             <dd>{user.email}</dd>
@@ -140,18 +161,24 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
               </select>
             </dd>
           </label>
-        </Section>
+          </dl>
+        </>
       )}
+
+      <Section title="Your lists">
+        <OpenRow to="/tasks" label="Tasks" value={openTasks.length ? `${openTasks.length} open` : "none open"} />
+        <OpenRow to="/deleted" label="Recently deleted" sub="Restore or erase deleted entries" />
+      </Section>
 
       <Section title="Projects">
         {projects.map((p) => (
-          <div className="row" key={p.id}>
-            <span className="label">
-              {p.name}
-              {p.aliases.length > 0 && <span className="sub">also: {p.aliases.join(", ")}</span>}
-            </span>
-            <span className="faint">{p.status.toLowerCase()}</span>
-          </div>
+          <OpenRow
+            key={p.id}
+            to={`/project/${p.id}`}
+            label={p.name}
+            sub={p.aliases.length > 0 ? `also: ${p.aliases.join(", ")}` : undefined}
+            value={p.status.toLowerCase()}
+          />
         ))}
         <AddRow
           placeholder="New project"
@@ -164,12 +191,12 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
 
       <Section title="Goals">
         {goals.map((g) => (
-          <div className="row" key={g.id}>
-            <span className="label">
-              {g.title}
-              {g.projects.length > 0 && <span className="sub">{g.projects.map((p) => p.name).join(", ")}</span>}
-            </span>
-          </div>
+          <OpenRow
+            key={g.id}
+            to={`/goal/${g.id}`}
+            label={g.title}
+            sub={g.projects.length > 0 ? g.projects.map((p) => p.name).join(", ") : undefined}
+          />
         ))}
         <AddRow
           placeholder="New goal"
@@ -182,10 +209,12 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
 
       <Section title="Habits">
         {habits.map((h) => (
-          <div className="row" key={h.id}>
-            <span className="label">{h.name}</span>
-            <span className="faint">{h.target_count ? `${h.target_count}× ${h.frequency.toLowerCase()}` : h.frequency.toLowerCase()}</span>
-          </div>
+          <OpenRow
+            key={h.id}
+            to={`/habit/${h.id}`}
+            label={h.name}
+            value={h.target_count ? `${h.target_count}× ${h.frequency.toLowerCase()}` : h.frequency.toLowerCase()}
+          />
         ))}
         <AddRow
           placeholder="New habit, e.g. Exercise"
@@ -199,13 +228,13 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
       <Section title="What you've learned">
         {knowledge.length === 0 && <div className="empty">Concepts appear here as you mention what you learn.</div>}
         {knowledge.map((k) => (
-          <div className="row" key={k.id}>
-            <span className="label">
-              {k.title}
-              <span className="sub">{k.understanding_state.toLowerCase().replace(/_/g, " ")}</span>
-            </span>
-            <span className="faint">{k.evidence_count}</span>
-          </div>
+          <OpenRow
+            key={k.id}
+            to={`/knowledge/${k.id}`}
+            label={k.title}
+            sub={UNDERSTANDING[k.understanding_state] ?? k.understanding_state}
+            value={`${k.evidence_count} entr${k.evidence_count === 1 ? "y" : "ies"}`}
+          />
         ))}
       </Section>
 

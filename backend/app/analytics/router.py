@@ -14,7 +14,7 @@ from app.core.timeutil import local_today
 from app.db.session import get_db
 from app.events.models import Event
 from app.events.schemas import EntityRef, EventSummary
-from app.events.service import search_condition, to_summary
+from app.events.service import like_pattern, search_condition, to_summary
 from app.knowledge.models import Knowledge, KnowledgeAlias
 from app.projects.models import Project, ProjectAlias
 from app.tasks.models import Task
@@ -58,36 +58,44 @@ def search(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SearchResults:
-    pattern = f"%{q.strip()}%"
+    pattern = like_pattern(q)
     events = db.scalars(
         select(Event)
         .where(Event.user_id == user.id, Event.deleted_at.is_(None), search_condition(q))
         .order_by(Event.occurred_on.desc(), Event.sort_at.desc())
         .limit(limit)
     )
-    project_alias = select(ProjectAlias.project_id).where(ProjectAlias.alias.ilike(pattern))
+    project_alias = select(ProjectAlias.project_id).where(
+        ProjectAlias.alias.ilike(pattern, escape="\\")
+    )
     projects = db.scalars(
         select(Project)
         .where(
             Project.user_id == user.id,
             Project.deleted_at.is_(None),
-            or_(Project.name.ilike(pattern), Project.id.in_(project_alias)),
+            or_(Project.name.ilike(pattern, escape="\\"), Project.id.in_(project_alias)),
         )
         .limit(limit)
     )
-    knowledge_alias = select(KnowledgeAlias.knowledge_id).where(KnowledgeAlias.alias.ilike(pattern))
+    knowledge_alias = select(KnowledgeAlias.knowledge_id).where(
+        KnowledgeAlias.alias.ilike(pattern, escape="\\")
+    )
     knowledge = db.scalars(
         select(Knowledge)
         .where(
             Knowledge.user_id == user.id,
             Knowledge.deleted_at.is_(None),
-            or_(Knowledge.title.ilike(pattern), Knowledge.id.in_(knowledge_alias)),
+            or_(Knowledge.title.ilike(pattern, escape="\\"), Knowledge.id.in_(knowledge_alias)),
         )
         .limit(limit)
     )
     tasks = db.scalars(
         select(Task)
-        .where(Task.user_id == user.id, Task.deleted_at.is_(None), Task.title.ilike(pattern))
+        .where(
+            Task.user_id == user.id,
+            Task.deleted_at.is_(None),
+            Task.title.ilike(pattern, escape="\\"),
+        )
         .limit(limit)
     )
     return SearchResults(

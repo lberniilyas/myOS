@@ -67,7 +67,7 @@ def build_message(applied: AppliedChanges, *, question_answer: str | None = None
         )
     if question_answer:
         sentences.append(question_answer)
-    if not sentences:
+    if not sentences and not applied.clarifications:
         sentences.append("I didn't find anything to record in that.")
     if applied.clarifications:
         sentences.append(applied.clarifications[0].question)

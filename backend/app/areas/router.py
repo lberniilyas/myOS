@@ -10,6 +10,7 @@ from app.areas.models import Area
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.clock import Clock, get_clock
+from app.core.fields import NonBlank
 from app.core.text import compact_key
 from app.db.queries import get_owned
 from app.db.session import get_db
@@ -19,12 +20,12 @@ router = APIRouter(prefix="/v1/areas", tags=["areas"])
 
 
 class AreaCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+    name: NonBlank = Field(max_length=120)
     description: str | None = None
 
 
 class AreaUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
+    name: NonBlank | None = Field(default=None, max_length=120)
     description: str | None = None
 
 

@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     allowed_emails: str | None = None
 
     access_token_ttl_minutes: int = 60
-    refresh_token_ttl_days: int = 30
+    # Sliding: every refresh extends it, so the installed app stays signed in while it's used.
+    refresh_token_ttl_days: int = 365
 
     # "gemini", "anthropic", or "none" (captures are stored but not processed).
     ai_provider: str = "gemini"

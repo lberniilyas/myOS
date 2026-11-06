@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError } from "../api";
-import { navigate } from "../components";
+import { ConfirmButton, navigate } from "../components";
 import { TYPE_LABELS, dayHeading, localToday, whenLabel } from "../format";
 import type { CaptureResult, EventDetail as Detail } from "../types";
 
@@ -13,7 +13,7 @@ const SOURCE: Record<string, string> = {
 
 export function EventDetail({ id, notify, onChanged }: { id: string; notify: (text: string) => void; onChanged: () => void }) {
   const [event, setEvent] = useState<Detail | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [problem, setProblem] = useState<"missing" | "offline" | null>(null);
   const [correction, setCorrection] = useState("");
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState("");
@@ -29,8 +29,9 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
         setTitle(data.title);
         setMinutes(data.duration_seconds ? String(Math.round(data.duration_seconds / 60)) : "");
         setAmount(data.amount ?? "");
+        setProblem(null);
       })
-      .catch(() => setMissing(true));
+      .catch((e) => setProblem(e instanceof ApiError && e.status === 404 ? "missing" : "offline"));
   }
 
   useEffect(load, [id]);
@@ -59,9 +60,16 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
 
   const saveEdits = () =>
     run(async () => {
-      const body: Record<string, unknown> = { title };
-      if (minutes && Number(minutes) > 0) body.duration_minutes = Number(minutes);
+      // Only what changed: resending the shown minutes would turn "~2h" into an exact 2h.
+      const body: Record<string, unknown> = {};
+      if (title.trim() && title.trim() !== event?.title) body.title = title.trim();
+      const shownMinutes = event?.duration_seconds ? String(Math.round(event.duration_seconds / 60)) : "";
+      if (minutes !== shownMinutes && Number(minutes) > 0) body.duration_minutes = Number(minutes);
       if (amount && event?.amount !== amount) body.amount = amount;
+      if (Object.keys(body).length === 0) {
+        setEditing(false);
+        return;
+      }
       await api(`/v1/events/${id}`, { method: "PATCH", body });
       setEditing(false);
       notify("Updated.");
@@ -71,7 +79,7 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
   const remove = () =>
     run(async () => {
       await api(`/v1/events/${id}`, { method: "DELETE" });
-      notify("Deleted. Open it from history to undo.");
+      notify("Deleted. Restore it from Me → Recently deleted.");
       load();
     });
 
@@ -82,7 +90,16 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
       load();
     });
 
-  if (missing) return <div className="empty">This entry doesn't exist anymore.</div>;
+  if (problem === "missing") return <div className="empty">This entry doesn't exist anymore.</div>;
+  if (problem === "offline")
+    return (
+      <div className="empty">
+        Can't load this entry right now.{" "}
+        <button className="link" onClick={load}>
+          Try again
+        </button>
+      </div>
+    );
   if (!event) return null;
 
   const time = whenLabel(event);
@@ -98,14 +115,14 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
   if (topic) rows.push(["Topic", topic]);
   if (output) rows.push(["Output", output]);
   if (event.area) rows.push(["Area", event.area.name]);
-  const related: [string, string][] = [
-    ...event.projects.map((p): [string, string] => ["Project", p.name]),
-    ...event.goals.map((g): [string, string] => ["Goal", g.name]),
-    ...event.knowledge.map((k): [string, string] => ["Knowledge", k.title]),
-    ...event.habits.map((h): [string, string] => ["Habit", `${h.name} · ${h.outcome === "COMPLETED" ? "done" : "missed"}`]),
-    ...event.tasks.map((t): [string, string] => ["Task", t.name]),
+  // [label, value, page it opens]
+  const related: [string, string, string][] = [
+    ...event.projects.map((p): [string, string, string] => ["Project", p.name, `/project/${p.id}`]),
+    ...event.goals.map((g): [string, string, string] => ["Goal", g.name, `/goal/${g.id}`]),
+    ...event.knowledge.map((k): [string, string, string] => ["Knowledge", k.title, `/knowledge/${k.id}`]),
+    ...event.habits.map((h): [string, string, string] => ["Habit", `${h.name} · ${h.outcome === "COMPLETED" ? "done" : "missed"}`, `/habit/${h.id}`]),
+    ...event.tasks.map((t): [string, string, string] => ["Task", t.name, "/tasks"]),
   ];
-  if (event.related_event_count) related.push(["Related entries", String(event.related_event_count)]);
 
   return (
     <>
@@ -129,14 +146,25 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
       {related.length > 0 && (
         <>
           <h2>Connected to</h2>
-          <dl className="card" style={{ margin: 0 }}>
-            {related.map(([key, value], index) => (
-              <div className="kv" key={index}>
-                <dt>{key}</dt>
-                <dd>{value}</dd>
-              </div>
+          <div className="card">
+            {related.map(([key, value, to], index) => (
+              <button className="row" key={index} onClick={() => navigate(to)}>
+                <span className="label">
+                  {value}
+                  <span className="sub">{key}</span>
+                </span>
+                <span className="faint" aria-hidden="true">
+                  ›
+                </span>
+              </button>
             ))}
-          </dl>
+            {event.related_event_count > 0 && (
+              <div className="row">
+                <span className="label">Related entries</span>
+                <span className="value">{event.related_event_count}</span>
+              </div>
+            )}
+          </div>
         </>
       )}
 
@@ -183,9 +211,13 @@ export function EventDetail({ id, notify, onChanged }: { id: string; notify: (te
                 Edit details
               </button>
             )}
-            <button className="button danger" onClick={remove} disabled={busy}>
-              Delete entry
-            </button>
+            <ConfirmButton
+              label="Delete entry"
+              confirmLabel="Delete"
+              question="Delete this entry? You can restore it from Me → Recently deleted."
+              onConfirm={remove}
+              disabled={busy}
+            />
           </div>
         </>
       )}

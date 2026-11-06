@@ -134,7 +134,15 @@ def update_project(
         if parent_id == project.id:
             raise ValidationFailedError("A project can't be its own parent.")
         if parent_id:
-            get_owned(db, Project, parent_id, user.id, label="Parent project")
+            parent = get_owned(db, Project, parent_id, user.id, label="Parent project")
+            seen = set()
+            while parent.parent_project_id is not None and parent.id not in seen:
+                if parent.parent_project_id == project.id:
+                    raise ValidationFailedError(
+                        "A project can't sit under one of its own sub-projects."
+                    )
+                seen.add(parent.id)
+                parent = db.get(Project, parent.parent_project_id)
         project.parent_project_id = parent_id
     if "status" in changes and changes["status"]:
         project.status = changes["status"]

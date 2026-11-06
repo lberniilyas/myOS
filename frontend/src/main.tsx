@@ -10,6 +10,9 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
+// Ask the browser not to clear this app's storage (the sign-in and unsent entries live there).
+navigator.storage?.persist?.().catch(() => undefined);
+
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => undefined);

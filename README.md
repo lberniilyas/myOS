@@ -51,9 +51,13 @@ Vercel serves the app over HTTPS and runs the backend as one Python function ([v
    Paste the `DATABASE_URL_UNPOOLED` value from **Storage → your database**. Run this again whenever a change adds a migration.
 5. In **Deployments**, open the latest one's **⋯** menu and choose **Redeploy**, so the new variables apply.
 6. Open `https://<your-project>.vercel.app/health`; it should answer `{"status":"ok","ai_provider":"gemini"}`. Then open the site and create your account with an allowed email.
-7. On the iPhone, open the same address in Safari and choose **Share → Add to Home Screen**. Over HTTPS the in-app mic button and offline loading work.
+7. On the iPhone, open the same address in Safari and choose **Share → Add to Home Screen**, then open it from the home screen and sign in once there (the home-screen app keeps its own sign-in, separate from Safari). Over HTTPS the in-app mic button and offline loading work.
 
-Every push to `main` deploys again. If you change Python dependencies, regenerate the list Vercel installs from: `cd backend; uv export --frozen --no-dev --no-hashes --no-emit-project -o ../requirements.txt`.
+**Staying signed in.** The installed app stays signed in: each time you use it the session is renewed for another year, and a lost connection or a sleeping server never signs you out. Only **Me → Sign out**, or a year without opening the app, does.
+
+**Updates.** Every push to `main` deploys again. When an update adds a database migration (a new file in `backend/alembic/versions/`), run `.\scripts\migrate_production.ps1` again *before* pushing it, so the new code finds the tables it expects. If you change Python dependencies, regenerate the list Vercel installs from: `cd backend; uv export --frozen --no-dev --no-hashes --no-emit-project -o ../requirements.txt`.
+
+**Checks before deploys.** GitHub runs the tests on every push ([.github/workflows/ci.yml](.github/workflows/ci.yml)). To have Vercel deploy only commits that passed them, turn on **Settings → Git → Deployment Checks** in Vercel and select the CI checks.
 
 ## Privacy note about Gemini's free tier
 
@@ -63,8 +67,10 @@ Google's pricing page states that content sent to the free tier is used to impro
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest              # 115 tests, uses the local test database, no AI calls
+.\.venv\Scripts\python.exe -m pytest              # 185 tests, uses the local test database, no AI calls
 .\.venv\Scripts\python.exe -m evals.run_extraction  # scores real Gemini extraction on 22 realistic inputs
+cd ..\frontend
+npm test                                         # the send queue and sign-in rules on the phone
 ```
 
 The evaluation includes French, Darija, mixed-language and voice-style inputs. Run it after changing the prompt or the model.

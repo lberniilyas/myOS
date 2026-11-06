@@ -183,6 +183,8 @@ class ClarificationKind(StrEnum):
     DUPLICATE = "DUPLICATE"
     CORRECTION_TARGET = "CORRECTION_TARGET"
     DATE = "DATE"
+    # Keep or remove: a record whose evidence only partly matched, or deletions to confirm.
+    CONFIRM = "CONFIRM"
 
 
 class ClarificationStatus(StrEnum):

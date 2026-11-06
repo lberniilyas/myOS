@@ -4,11 +4,12 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.core.enums import TaskPriority, TaskStatus
+from app.core.fields import NonBlank
 from app.events.schemas import EntityRef
 
 
 class TaskCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
+    title: NonBlank = Field(max_length=500)
     description: str | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority | None = None
@@ -18,7 +19,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=500)
+    title: NonBlank | None = Field(default=None, max_length=500)
     description: str | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None

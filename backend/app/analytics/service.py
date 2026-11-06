@@ -168,7 +168,8 @@ def money_totals(
         entry = {
             "currency": currency,
             "amount": str(total.quantize(Decimal("0.01"))),
-            "display": format_amount(total, currency, precision),
+            # With no recorded amount, "0" would read as a measurement; show nothing instead.
+            "display": format_amount(total, currency, precision) if count > miss else None,
             "events": count,
             "approximate_events": approx,
             "events_without_amount": miss,

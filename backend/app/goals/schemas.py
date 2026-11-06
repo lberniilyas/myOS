@@ -4,11 +4,12 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.core.enums import GoalStatus
+from app.core.fields import NonBlank
 from app.events.schemas import EntityRef, EventSummary
 
 
 class GoalCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
+    title: NonBlank = Field(max_length=300)
     description: str | None = None
     status: GoalStatus = GoalStatus.ACTIVE
     area_id: uuid.UUID | None = None
@@ -18,7 +19,7 @@ class GoalCreate(BaseModel):
 
 
 class GoalUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=300)
+    title: NonBlank | None = Field(default=None, max_length=300)
     description: str | None = None
     status: GoalStatus | None = None
     area_id: uuid.UUID | None = None

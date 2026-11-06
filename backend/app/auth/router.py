@@ -74,7 +74,7 @@ def update_me(
     payload: UserUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> User:
     for field, value in payload.model_dump(exclude_unset=True).items():
-        if field in ("timezone", "locale", "week_start") and value is None:
+        if field in ("timezone", "locale", "week_start", "preferences") and value is None:
             continue
         setattr(user, field, value)
     db.commit()

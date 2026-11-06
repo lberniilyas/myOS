@@ -4,10 +4,11 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.core.enums import HabitFrequency, HabitOutcome, HabitStatus
+from app.core.fields import NonBlank
 
 
 class HabitCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: NonBlank = Field(max_length=200)
     description: str | None = None
     frequency: HabitFrequency = HabitFrequency.WEEKLY
     target_count: int | None = Field(default=None, gt=0, le=1000)
@@ -15,7 +16,7 @@ class HabitCreate(BaseModel):
 
 
 class HabitUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: NonBlank | None = Field(default=None, max_length=200)
     description: str | None = None
     frequency: HabitFrequency | None = None
     target_count: int | None = Field(default=None, gt=0, le=1000)
