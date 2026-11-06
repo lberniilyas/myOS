@@ -4,6 +4,12 @@ from functools import lru_cache
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MISSING_DATABASE = (
+    "DATABASE_URL is not set, so there is no database to use. Set it to your PostgreSQL "
+    "connection string (for example Neon's) - on Render: your service > Environment; on Vercel: "
+    "Settings > Environment Variables - then deploy again."
+)
+
 
 def sqlalchemy_url(url: str) -> str:
     """Accept the plain postgres:// URLs that hosting providers (Neon, Supabase...) hand out."""
@@ -70,6 +76,13 @@ class Settings(BaseSettings):
     @property
     def serverless(self) -> bool:
         return bool(os.environ.get("VERCEL"))
+
+    @property
+    def database_configured(self) -> bool:
+        """False on a hosted deployment where nobody set the database address: the built-in
+        default points at the dev database on your PC, which doesn't exist there."""
+        names = ("DATABASE_URL", "POSTGRES_URL")
+        return not self.is_production or any(os.environ.get(name, "").strip() for name in names)
 
     def may_register(self, email: str) -> bool:
         if not (self.allowed_emails or "").strip():

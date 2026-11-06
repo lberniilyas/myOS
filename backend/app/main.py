@@ -15,7 +15,7 @@ from app.areas.router import router as areas_router
 from app.assistant.router import router as assistant_router
 from app.auth.router import router as account_router
 from app.captures.router import router as captures_router
-from app.config import get_settings
+from app.config import MISSING_DATABASE, get_settings
 from app.db import all_models  # noqa: F401  (registers models before first query)
 from app.errors import AppError
 from app.events.router import router as events_router
@@ -52,6 +52,8 @@ def _error(status: int, code: str, message: str, details: object = None) -> JSON
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
+    if not settings.database_configured:
+        logger.error(MISSING_DATABASE)
     hide_docs = settings.is_production
     app = FastAPI(
         title="Personal OS",

@@ -1,9 +1,10 @@
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from app.config import get_settings
+from app.config import MISSING_DATABASE, get_settings
 from app.db import all_models  # noqa: F401  (registers every table on the metadata)
 from app.db.base import Base
 
@@ -12,8 +13,11 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
     fileConfig(config.config_file_name)
 
 if not config.get_main_option("sqlalchemy.url"):
+    settings = get_settings()
+    if not settings.database_configured:
+        sys.exit(MISSING_DATABASE)  # one clear line instead of a connection-refused traceback
     # Alembic's config treats % as interpolation; hosted passwords can contain it.
-    config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
+    config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

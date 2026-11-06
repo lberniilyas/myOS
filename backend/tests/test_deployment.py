@@ -1,6 +1,8 @@
 """Behaviour that matters once the app runs on the public internet (Vercel) and on flaky networks."""
 
+import os
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,6 +70,42 @@ class TestPublicDeployment:
         # vercel.json sets them there; sending them twice would make X-Frame-Options invalid.
         with TestClient(create_app()) as client:
             assert "content-security-policy" not in client.get("/health").headers
+
+    def test_a_missing_database_address_is_reported_in_one_line(self, production):
+        production.delenv("DATABASE_URL", raising=False)
+        production.delenv("POSTGRES_URL", raising=False)
+        get_settings.cache_clear()
+        assert get_settings().database_configured is False
+        production.setenv("DATABASE_URL", "postgresql://u:p@ep-x.eu-central-1.aws.neon.tech/neondb")
+        get_settings.cache_clear()
+        assert get_settings().database_configured is True
+
+    def test_the_migration_stops_with_that_line(self, production, tmp_path):
+        import subprocess
+        import sys
+
+        production.delenv("DATABASE_URL", raising=False)
+        production.delenv("POSTGRES_URL", raising=False)
+        backend = Path(__file__).resolve().parent.parent
+        # Run where no .env file exists, like on Render.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(backend / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": str(backend)},
+        )
+        assert result.returncode != 0
+        assert "DATABASE_URL is not set" in result.stderr
+        assert "Traceback" not in result.stderr
 
     def test_api_docs_are_hidden(self, production):
         # Locally the web app answers unknown paths with its own page, so check the content.

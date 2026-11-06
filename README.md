@@ -81,7 +81,7 @@ Google's pricing page states that content sent to the free tier is used to impro
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest              # 188 tests, uses the local test database, no AI calls
+.\.venv\Scripts\python.exe -m pytest              # 190 tests, uses the local test database, no AI calls
 .\.venv\Scripts\python.exe -m evals.run_extraction  # scores real Gemini extraction on 22 realistic inputs
 cd ..\frontend
 npm test                                         # the send queue and sign-in rules on the phone
