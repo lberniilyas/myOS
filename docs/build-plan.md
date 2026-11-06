@@ -91,7 +91,7 @@ Status: ✅ done · 🔄 in progress · ⬜ not started
 | Assistant over database tools | 13 | ✅ |
 | Extraction evaluation set and runner | spec #10 | ✅ |
 | Voice: browser speech + keyboard dictation; server transcription later | 10 | 🔄 |
-| HTTPS hosting so the app works away from home | — | 🔄 Vercel + Neon chosen 2026-11-05; config ready, steps in the README |
+| HTTPS hosting so the app works away from home | — | 🔄 Vercel (2026-11-05) or Render (2026-11-06) with Neon; both configured, steps in the README |
 | Analytics baselines | 14 | ⬜ |
 | Insights, reviews, memory | 15–17 | ⬜ |
 | Automatic sources (calendar, device data, PC agent) | 18 | ⬜ |

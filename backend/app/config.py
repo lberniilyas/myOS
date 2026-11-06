@@ -59,7 +59,13 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.app_env == "production" or bool(os.environ.get("VERCEL"))
+        # Vercel and Render set these in every deployment, so a forgotten APP_ENV can't leave
+        # sign-up open or the API docs visible on the internet.
+        return (
+            self.app_env == "production"
+            or bool(os.environ.get("VERCEL"))
+            or bool(os.environ.get("RENDER"))
+        )
 
     @property
     def serverless(self) -> bool:

@@ -59,6 +59,20 @@ Vercel serves the app over HTTPS and runs the backend as one Python function ([v
 
 **Checks before deploys.** GitHub runs the tests on every push ([.github/workflows/ci.yml](.github/workflows/ci.yml)). To have Vercel deploy only commits that passed them, turn on **Settings → Git → Deployment Checks** in Vercel and select the CI checks.
 
+## Deploy on Render
+
+Render runs everything as one always-on server: it builds the web app, creates or updates the database tables on every start, then serves the API and the app. The setup is in [render.yaml](render.yaml).
+
+1. Get a PostgreSQL connection string that lasts. If you set up Neon for Vercel, reuse it. Otherwise create a free project on [neon.tech](https://neon.tech) in the Frankfurt region and copy its connection string. Don't use Render's free database for real data: Render deletes it, with everything in it, 30 days after creation (plus 14 days' grace). A paid Render database is fine; use its **Internal Database URL**.
+2. In the [Render dashboard](https://dashboard.render.com), choose **New → Blueprint** and connect the GitHub repository. Render reads `render.yaml` and asks for three values:
+   - `DATABASE_URL`: the connection string from step 1.
+   - `GEMINI_API_KEY`: your Gemini key.
+   - `ALLOWED_EMAILS`: the email (or comma-separated emails) allowed to create an account.
+3. Choose **Apply**. The first build takes a few minutes. There's no separate migration step: the tables are created when the server starts.
+4. Open `https://<your-service>.onrender.com/health`; it should answer `{"status":"ok","ai_provider":"gemini"}`. Then create your account and add the address to your iPhone's home screen, as in step 7 of the Vercel section.
+
+Render deploys a push to `main` only after the GitHub checks pass. On the free plan the server sleeps after 15 minutes without visits, and the next visit takes about a minute to wake it; anything you record meanwhile waits on the phone and is sent automatically. A paid plan doesn't sleep, and there you can move the migration from `startCommand` to `preDeployCommand` in `render.yaml`, so a failing migration stops the deploy instead of the server.
+
 ## Privacy note about Gemini's free tier
 
 Google's pricing page states that content sent to the free tier is used to improve Google's products; the paid tier doesn't do this. Your entries are personal, so switch to a paid Gemini key, or set `AI_PROVIDER=anthropic` with a Claude key, before recording anything sensitive.
@@ -67,7 +81,7 @@ Google's pricing page states that content sent to the free tier is used to impro
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest              # 185 tests, uses the local test database, no AI calls
+.\.venv\Scripts\python.exe -m pytest              # 188 tests, uses the local test database, no AI calls
 .\.venv\Scripts\python.exe -m evals.run_extraction  # scores real Gemini extraction on 22 realistic inputs
 cd ..\frontend
 npm test                                         # the send queue and sign-in rules on the phone

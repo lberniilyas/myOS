@@ -1,0 +1,28 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec): one web service that runs the API and
+# serves the web app. Create it in Render with New → Blueprint; steps in the README ("Deploy on Render").
+#
+# No database is created here on purpose: Render's free PostgreSQL is deleted 30 days (+14 days
+# grace) after creation, with all its data. Paste the address of a database that lasts instead:
+# Neon's free tier, or a paid Render PostgreSQL.
+services:
+  - type: web
+    name: personal-os
+    runtime: python # Python from .python-version (3.12); Node.js for the web app build is included
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt && npm ci --prefix frontend && npm run build --prefix frontend
+    # Migrations run before every start; with nothing new they take about two seconds. On a paid
+    # plan they can move to preDeployCommand, so a failing migration never reaches a running server.
+    startCommand: cd backend && python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    # Deploy only commits that passed the GitHub checks in .github/workflows/ci.yml.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DATABASE_URL # PostgreSQL connection string (Neon: the pooled one is fine)
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ALLOWED_EMAILS # who may create an account, comma-separated
+        sync: false
+      - key: NODE_VERSION
+        value: "24"

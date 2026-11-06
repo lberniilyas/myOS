@@ -47,6 +47,28 @@ class TestPublicDeployment:
         assert sign_up(client, "dev@example.com").status_code == 201
         get_settings.cache_clear()
 
+    def test_render_counts_as_production_too(self, client, monkeypatch):
+        monkeypatch.setenv("RENDER", "true")  # set by Render in every service
+        get_settings.cache_clear()
+        response = sign_up(client, "stranger@example.com")
+        get_settings.cache_clear()
+        assert response.json()["error"]["code"] == "REGISTRATION_CLOSED"
+
+    def test_the_app_sends_security_headers_when_it_serves_the_pages(self, monkeypatch):
+        monkeypatch.setenv("RENDER", "true")
+        get_settings.cache_clear()
+        with TestClient(create_app()) as client:
+            for path in ("/", "/health", "/v1/me"):
+                headers = client.get(path).headers
+                assert "frame-ancestors 'none'" in headers["content-security-policy"], path
+                assert headers["x-content-type-options"] == "nosniff"
+        get_settings.cache_clear()
+
+    def test_on_vercel_the_platform_adds_them_instead(self, production):
+        # vercel.json sets them there; sending them twice would make X-Frame-Options invalid.
+        with TestClient(create_app()) as client:
+            assert "content-security-policy" not in client.get("/health").headers
+
     def test_api_docs_are_hidden(self, production):
         # Locally the web app answers unknown paths with its own page, so check the content.
         with TestClient(create_app()) as client:

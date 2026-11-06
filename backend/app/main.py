@@ -28,6 +28,18 @@ from app.tasks.router import router as tasks_router
 
 logger = logging.getLogger("app")
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+# Same values as the "headers" in vercel.json; keep the two in step.
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), geolocation=(), microphone=(self)",
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
+        "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    ),
+}
 
 
 def _error(status: int, code: str, message: str, details: object = None) -> JSONResponse:
@@ -61,6 +73,11 @@ def create_app() -> FastAPI:
         finally:
             request_id_var.reset(token)
         response.headers["x-request-id"] = request_id
+        if not settings.serverless:
+            # On Vercel the platform adds these from vercel.json; everywhere else (Render, your
+            # PC) the app serves the web pages itself, so it adds them.
+            for name, value in SECURITY_HEADERS.items():
+                response.headers.setdefault(name, value)
         if request.url.path.startswith("/v1"):
             logger.info(
                 "%s %s -> %s (%.0f ms) [%s]",
