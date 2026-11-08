@@ -69,9 +69,22 @@ Render runs everything as one always-on server: it builds the web app, creates o
    - `GEMINI_API_KEY`: your Gemini key.
    - `ALLOWED_EMAILS`: the email (or comma-separated emails) allowed to create an account.
 3. Choose **Apply**. The first build takes a few minutes. There's no separate migration step: the tables are created when the server starts.
-4. Open `https://<your-service>.onrender.com/health`; it should answer `{"status":"ok","ai_provider":"gemini"}`. Then create your account and add the address to your iPhone's home screen, as in step 7 of the Vercel section.
+4. Open `https://<your-service>.onrender.com/health`; it should answer `{"status":"ok","ai_provider":"gemini",...}`. Then create your account and add the address to your iPhone's home screen, as in step 7 of the Vercel section.
+5. Let GitHub deploy: in Render, open the service's **Settings → Deploy Hook** and copy the URL. In GitHub, open the repository's **Settings → Secrets and variables → Actions → New repository secret**, name it `RENDER_DEPLOY_HOOK_URL` and paste the URL. Treat it like a password.
 
-Render deploys a push to `main` only after the GitHub checks pass. On the free plan the server sleeps after 15 minutes without visits, and the next visit takes about a minute to wake it; anything you record meanwhile waits on the phone and is sent automatically. A paid plan doesn't sleep, and there you can move the migration from `startCommand` to `preDeployCommand` in `render.yaml`, so a failing migration stops the deploy instead of the server.
+### How deploys work (CI/CD)
+
+Render never deploys on its own (`autoDeployTrigger: off`). Every push to `main` runs the pipeline in [.github/workflows/ci.yml](.github/workflows/ci.yml):
+
+1. **Backend tests** on a real PostgreSQL, with lint, formatting, 85% minimum coverage, and migrations going up, down and up again.
+2. **Frontend** unit tests, type-check and build.
+3. **End-to-end tests** in WebKit (Safari's engine) at iPhone size, against a real server with a deterministic demo AI: sign-in, capture, offline sending, editing, deleting, tasks, projects, habits, and accessibility (WCAG 2 AA) on every screen in light and dark mode.
+4. **Security and configuration**: known vulnerabilities in Python and JavaScript packages, `requirements.txt` matching the lockfile, `render.yaml` matching Render's schema, valid workflow files.
+5. **Deploy**, only if all of the above passed: GitHub calls the deploy hook, waits until production reports the new commit at `/health`, then runs [backend/scripts/smoke_test.py](backend/scripts/smoke_test.py) against it. That check is read-only: the page, its assets, security headers, the database connection, sign-up closed to strangers, hidden API docs.
+
+If any step fails, nothing is deployed and GitHub emails you. If the check after a deploy fails, Render keeps serving, so roll back in Render (**Events → a previous deploy → Rollback**) and push a fix. You can run the same check by hand at any time: `cd backend; .\.venv\Scripts\python.exe scripts\smoke_test.py https://<your-service>.onrender.com --production`.
+
+On the free plan the server sleeps after 15 minutes without visits, and the next visit takes about a minute to wake it; anything you record meanwhile waits on the phone and is sent automatically. A paid plan doesn't sleep, and there you can move the migration from `startCommand` to `preDeployCommand` in `render.yaml`, so a failing migration stops the deploy instead of the server.
 
 ## Privacy note about Gemini's free tier
 
@@ -81,10 +94,25 @@ Google's pricing page states that content sent to the free tier is used to impro
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest              # 190 tests, uses the local test database, no AI calls
+.\.venv\Scripts\python.exe -m pytest              # backend tests, local test database, no AI calls
 .\.venv\Scripts\python.exe -m evals.run_extraction  # scores real Gemini extraction on 22 realistic inputs
 cd ..\frontend
 npm test                                         # the send queue and sign-in rules on the phone
+```
+
+**End-to-end tests** drive the real app in WebKit at iPhone size. They need a server running with the demo AI, which answers a fixed set of English phrasings the same way every time (a public server refuses it). Create the database once with `createdb -h localhost -p 5433 -U personal_os personal_os_e2e`, then:
+
+```powershell
+# terminal 1: a server on its own database, with the demo AI
+cd backend
+$env:AI_PROVIDER = "demo"; $env:DATABASE_URL = "postgresql+psycopg://personal_os:personal_os@localhost:5433/personal_os_e2e"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
+
+# terminal 2
+cd frontend
+npx playwright install webkit   # once
+npm run build; npx playwright test
 ```
 
 The evaluation includes French, Darija, mixed-language and voice-style inputs. Run it after changing the prompt or the model.

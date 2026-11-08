@@ -142,7 +142,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["system"])
     def health() -> dict:
-        return {"status": "ok", "ai_provider": settings.ai_provider}
+        return {"status": "ok", "ai_provider": settings.ai_provider, "release": settings.release}
 
     if FRONTEND_DIST.is_dir():
         assets = FRONTEND_DIST / "assets"

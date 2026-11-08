@@ -78,6 +78,14 @@ class Settings(BaseSettings):
         return bool(os.environ.get("VERCEL"))
 
     @property
+    def release(self) -> str:
+        """The deployed commit, so a deploy can be checked from outside; "dev" on your PC."""
+        for name in ("RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA", "GIT_COMMIT"):
+            if value := os.environ.get(name, "").strip():
+                return value
+        return "dev"
+
+    @property
     def database_configured(self) -> bool:
         """False on a hosted deployment where nobody set the database address: the built-in
         default points at the dev database on your PC, which doesn't exist there."""

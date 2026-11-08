@@ -126,20 +126,25 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
             <dt>Email</dt>
             <dd>{user.email}</dd>
           </div>
-          <label className="kv">
-            <dt>Timezone</dt>
+          <div className="kv">
+            <dt>
+              <label htmlFor="profile-timezone">Timezone</label>
+            </dt>
             <dd>
-              <select value={user.timezone} onChange={(e) => updateProfile({ timezone: e.target.value })} style={{ border: "none", background: "none", textAlign: "right", maxWidth: "58vw" }}>
+              <select id="profile-timezone" value={user.timezone} onChange={(e) => updateProfile({ timezone: e.target.value })} style={{ border: "none", background: "none", textAlign: "right", maxWidth: "58vw" }}>
                 {(zones.includes(user.timezone) ? zones : [user.timezone, ...zones]).map((zone) => (
                   <option key={zone}>{zone}</option>
                 ))}
               </select>
             </dd>
-          </label>
-          <label className="kv">
-            <dt>Usual currency</dt>
+          </div>
+          <div className="kv">
+            <dt>
+              <label htmlFor="profile-currency">Usual currency</label>
+            </dt>
             <dd>
               <input
+                id="profile-currency"
                 defaultValue={user.default_currency ?? ""}
                 maxLength={3}
                 placeholder="MAD"
@@ -150,17 +155,19 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
                 style={{ border: "none", background: "none", textAlign: "right", width: 70 }}
               />
             </dd>
-          </label>
-          <label className="kv">
-            <dt>Language for titles</dt>
+          </div>
+          <div className="kv">
+            <dt>
+              <label htmlFor="profile-locale">Language for titles</label>
+            </dt>
             <dd>
-              <select value={user.locale} onChange={(e) => updateProfile({ locale: e.target.value })} style={{ border: "none", background: "none" }}>
+              <select id="profile-locale" value={user.locale} onChange={(e) => updateProfile({ locale: e.target.value })} style={{ border: "none", background: "none" }}>
                 <option value="en">English</option>
                 <option value="fr">Français</option>
                 <option value="ar">العربية</option>
               </select>
             </dd>
-          </label>
+          </div>
           </dl>
         </>
       )}

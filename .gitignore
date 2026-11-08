@@ -8,3 +8,5 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 .vercel/
+frontend/test-results/
+frontend/playwright-report/

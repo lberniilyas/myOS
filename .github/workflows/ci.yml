@@ -1,18 +1,35 @@
-# Runs on every push and pull request, so a change that breaks something is caught before
-# Vercel deploys it. To make Vercel wait for these checks, see the README ("Deploy on Vercel").
-name: CI
+# CI/CD: every push and pull request is tested; a push to main that passes everything is deployed
+# to Render and then checked from the outside. Production only ever runs tested code.
+#
+#   backend ──┐
+#   frontend ─┤
+#   e2e ──────┼──> deploy (main only): Render deploy hook -> wait for the new commit -> smoke test
+#   checks ───┘
+#
+# One-time setup: the RENDER_DEPLOY_HOOK_URL secret (README, "Deploy on Render").
+name: CI/CD
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
+# A newer push to a branch replaces its older run; on main every run finishes, so no deploy is
+# cut off halfway.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTION_URL: https://personal-os-k8t0.onrender.com
 
 jobs:
   backend:
+    name: Backend tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -36,14 +53,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
       - name: Install
         run: uv sync --frozen
       - name: Lint
         run: uv run ruff check .
       - name: Formatting
         run: uv run ruff format --check .
-      - name: Tests
-        run: uv run pytest
+      - name: Tests (coverage must stay at 85% or more)
+        run: uv run pytest --cov=app --cov-report=term --cov-fail-under=85
       - name: Migrations match the models and go down and up cleanly
         env:
           DATABASE_URL: postgresql+psycopg://personal_os:personal_os@localhost:5432/personal_os_test
@@ -54,6 +73,7 @@ jobs:
           uv run alembic upgrade head
 
   frontend:
+    name: Frontend tests and build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,7 +87,118 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install
         run: npm ci
-      - name: Tests
+      - name: Unit tests
         run: npm test
       - name: Type-check and build
         run: npm run build
+
+  e2e:
+    name: End-to-end tests (iPhone, WebKit)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: personal_os
+          POSTGRES_PASSWORD: personal_os
+          POSTGRES_DB: personal_os_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U personal_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://personal_os:personal_os@localhost:5432/personal_os_e2e
+      AI_PROVIDER: demo
+      E2E_BASE_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: |
+          (cd backend && uv sync --frozen)
+          (cd frontend && npm ci && npx playwright install --with-deps webkit)
+      - name: Build the app
+        run: npm run build --prefix frontend
+      - name: Start the server (demo AI, empty database)
+        working-directory: backend
+        run: |
+          uv run alembic upgrade head
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/server.log" 2>&1 &
+          curl --silent --fail --retry 30 --retry-connrefused --retry-delay 1 "$E2E_BASE_URL/health"
+      - name: Browser tests
+        working-directory: frontend
+        run: npx playwright test
+      - name: Smoke test, as run against production after a deploy
+        run: python3 backend/scripts/smoke_test.py "$E2E_BASE_URL"
+      - name: Keep the report, traces and server log of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+            ${{ runner.temp }}/server.log
+          retention-days: 14
+
+  checks:
+    name: Security and configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: requirements.txt (what Render installs) matches uv.lock
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project --quiet -o "$RUNNER_TEMP/requirements.txt"
+          diff <(grep -v '^#' "$RUNNER_TEMP/requirements.txt") <(grep -v '^#' ../requirements.txt) \
+            || { echo "::error::requirements.txt is out of date; regenerate it (README, Deploy on Render)."; exit 1; }
+      - name: Known vulnerabilities in Python packages
+        run: uvx pip-audit --requirement requirements.txt --no-deps --disable-pip
+      - name: Known vulnerabilities in JavaScript packages (high and critical)
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: render.yaml matches Render's schema
+        run: uvx check-jsonschema --schemafile https://render.com/schema/render.yaml.json render.yaml
+      - name: Workflow files are valid
+        run: uvx --from actionlint-py actionlint
+
+  deploy:
+    name: Deploy to production
+    needs: [backend, frontend, e2e, checks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ env.PRODUCTION_URL }}
+    # One deploy at a time, in order; a queued one waits instead of cancelling a running one.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the smoke test checks that production runs this commit or a later one
+      - name: Ask Render to deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "::error title=Deploys aren't set up::Add the RENDER_DEPLOY_HOOK_URL repository secret (README, Deploy on Render)."
+            exit 1
+          fi
+          curl --silent --show-error --fail --max-time 60 --request POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
+      - name: Wait for the new version, then check production from the outside
+        run: python3 backend/scripts/smoke_test.py "$PRODUCTION_URL" --production --release "$GITHUB_SHA" --wait 1200

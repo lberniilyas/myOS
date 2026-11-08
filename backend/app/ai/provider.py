@@ -91,6 +91,10 @@ class AIProvider(ABC):
 
 @lru_cache
 def _provider(name: str) -> AIProvider:
+    if name == "demo":
+        from app.ai.demo_provider import DemoAIProvider
+
+        return DemoAIProvider()
     if name == "anthropic":
         from app.ai.anthropic_provider import AnthropicProvider
 
@@ -102,7 +106,11 @@ def _provider(name: str) -> AIProvider:
 
 def get_ai_provider() -> AIProvider | None:
     """FastAPI dependency. None means AI processing is switched off."""
-    name = get_settings().ai_provider.lower()
+    settings = get_settings()
+    name = settings.ai_provider.lower()
     if name in ("gemini", "anthropic"):
+        return _provider(name)
+    # The rule-based demo AI exists for automated tests; a public server never uses it.
+    if name == "demo" and not settings.is_production:
         return _provider(name)
     return None
