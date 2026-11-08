@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { api, ApiError, sendCapture } from "./api";
+import { api, ApiError, followCapture, sendCapture, stillWorking } from "./api";
 import { TYPE_MARKS, eventValue, whenLabel } from "./format";
 import type { CaptureResult, Clarification, EventSummary } from "./types";
 
@@ -272,11 +272,39 @@ export function CaptureSheet({ onClose, onSaved, language }: { onClose: () => vo
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [answered, setAnswered] = useState<string[]>([]);
+  const [slow, setSlow] = useState(false);
   const recognition = useRef<Recognition | null>(null);
   const base = useRef("");
+  const savedRef = useRef(onSaved);
+  savedRef.current = onSaved;
   const Speech = speechRecognition();
 
   useEffect(() => () => recognition.current?.stop(), []);
+
+  // Saved at once; the understanding arrives afterwards. Follow it while the sheet is open
+  // (Home shows it too, so closing the sheet loses nothing).
+  const following = result && stillWorking(result) ? result.capture.id : null;
+  useEffect(() => {
+    if (!following) return;
+    const stop = new AbortController();
+    setSlow(false);
+    const onUpdate = (latest: CaptureResult) => {
+      setResult(latest);
+      if (!stillWorking(latest)) savedRef.current(); // Home shows the new entries
+    };
+    followCapture(following, { onUpdate, signal: stop.signal }).then((done) => {
+      if (!done && !stop.signal.aborted) setSlow(true);
+    });
+    return () => stop.abort();
+  }, [following]);
+
+  function startOver() {
+    setResult(null);
+    setText("");
+    setUsedVoice(false);
+    setAnswered([]);
+    setSlow(false);
+  }
 
   function toggleMic() {
     if (!Speech) return;
@@ -331,6 +359,25 @@ export function CaptureSheet({ onClose, onSaved, language }: { onClose: () => vo
     );
   }
 
+  if (result && stillWorking(result)) {
+    return (
+      <Sheet title="Saved" onClose={onClose}>
+        <div className="card" role="status">
+          <div className="reply working">
+            <span className="spinner" aria-hidden="true" />
+            <span>{slow ? "Still working on it. It's saved, and it'll show on Home when it's ready." : result.message}</span>
+          </div>
+          <p className="faint working-hint">You can close this or keep going; it'll show on Home.</p>
+        </div>
+        <div className="stack" style={{ marginTop: 16 }}>
+          <button className="button secondary" onClick={startOver}>
+            Tell me something else
+          </button>
+        </div>
+      </Sheet>
+    );
+  }
+
   if (result) {
     const lines = understoodLines(result);
     const open = result.clarifications.filter((c) => !answered.includes(c.id));
@@ -363,15 +410,7 @@ export function CaptureSheet({ onClose, onSaved, language }: { onClose: () => vo
           </div>
         ))}
         <div className="stack" style={{ marginTop: 16 }}>
-          <button
-            className="button secondary"
-            onClick={() => {
-              setResult(null);
-              setText("");
-              setUsedVoice(false);
-              setAnswered([]);
-            }}
-          >
+          <button className="button secondary" onClick={startOver}>
             Tell me something else
           </button>
         </div>
@@ -405,7 +444,7 @@ export function CaptureSheet({ onClose, onSaved, language }: { onClose: () => vo
         )}
         {error && <p className="error">{error}</p>}
         <button className="button" disabled={busy || !text.trim()} onClick={submit}>
-          {busy ? "Understanding…" : "Save"}
+          {busy ? "Saving…" : "Save"}
         </button>
       </div>
     </Sheet>

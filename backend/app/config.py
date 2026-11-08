@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     # to everyone else, so nobody who finds the URL can use your AI key.
     allowed_emails: str | None = None
 
+    # Understanding captures after the reply, and the sweep that recovers unfinished ones.
+    # Switched off only in tests, which run the sweep by hand.
+    capture_worker: bool = True
+    capture_worker_interval_seconds: float = 60.0
+    # Retry pauses are 1, 5, 15 and 60 of these (seconds); tests make them short.
+    capture_retry_unit_seconds: float = 60.0
+
     access_token_ttl_minutes: int = 60
     # Sliding: every refresh extends it, so the installed app stays signed in while it's used.
     refresh_token_ttl_days: int = 365
@@ -76,6 +83,11 @@ class Settings(BaseSettings):
     @property
     def serverless(self) -> bool:
         return bool(os.environ.get("VERCEL"))
+
+    @property
+    def background_captures(self) -> bool:
+        """Work can continue after the reply (an always-on server, not a serverless function)."""
+        return not self.serverless
 
     @property
     def release(self) -> str:

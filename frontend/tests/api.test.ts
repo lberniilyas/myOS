@@ -39,14 +39,18 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
   return reply(call);
 }) as typeof fetch;
 
-const { api, ApiError, flushQueue, isSignedIn, pendingCaptures, saveTokens, sendCapture } = await import("../src/api.ts");
+const { api, ApiError, flushQueue, followCapture, isSignedIn, pendingCaptures, saveTokens, sendCapture, stillWorking } = await import(
+  "../src/api.ts"
+);
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const processed = (extra: object = {}) => json(200, { capture: { id: "c1" }, message: "Logged it.", error: null, ...extra });
 const busyAi = () => processed({ error: { code: "AI_RATE_LIMITED", message: "busy", retryable: true } });
 const networkDown = () => Promise.reject(new TypeError("Load failed"));
-const captureCalls = () => calls.filter((c) => c.url === "/v1/captures");
+const captureCalls = () => calls.filter((c) => c.url === "/v1/captures?background=true");
+const saved = (status: string, extra: object = {}) =>
+  json(status === "PROCESSING" ? 202 : 200, { capture: { id: "c1", status, ...extra }, message: "Saved. Understanding it…", error: null });
 
 let signedOut = 0;
 page.addEventListener("pos:signed-out", () => {
@@ -158,4 +162,60 @@ test("only a refused session signs you out, and queued entries survive it", asyn
   assert.equal(signedOut, 1);
   assert.equal(isSignedIn(), false);
   assert.deepEqual(pendingCaptures().map((p) => p.content), ["written offline"]);
+});
+
+// --- instant saving ------------------------------------------------------------------------
+
+test("the server has an entry as soon as it replies, so it leaves the queue", async () => {
+  reply = () => saved("PROCESSING");
+  const result = await sendCapture("Studied AI", "TEXT");
+  assert.equal(result?.capture.status, "PROCESSING");
+  assert.equal(pendingCaptures().length, 0);
+  assert.equal(captureCalls().length, 1, "sent asking for the quick reply");
+});
+
+test("queued entries go out asking for the quick reply too", async () => {
+  reply = networkDown;
+  await sendCapture("written offline", "TEXT");
+  calls = [];
+  reply = () => saved("PROCESSING");
+  assert.equal(await flushQueue(), 1);
+  assert.equal(pendingCaptures().length, 0);
+  assert.equal(captureCalls().length, 1);
+});
+
+test("an entry is still being worked on while it is understood or retried by the server", () => {
+  const result = (status: string, will_retry?: boolean) =>
+    ({ capture: { id: "c1", status, input_type: "TEXT", captured_at: "", will_retry } }) as Parameters<typeof stillWorking>[0];
+  assert.equal(stillWorking(result("CAPTURED")), true);
+  assert.equal(stillWorking(result("PROCESSING")), true);
+  assert.equal(stillWorking(result("FAILED", true)), true);
+  assert.equal(stillWorking(result("FAILED", false)), false);
+  assert.equal(stillWorking(result("PROCESSED")), false);
+  assert.equal(stillWorking(result("NEEDS_CLARIFICATION")), false);
+});
+
+test("following an entry reports each step and stops once it is understood", async () => {
+  const steps = [() => saved("PROCESSING"), networkDown, () => saved("FAILED", { will_retry: true }), () => saved("PROCESSED")];
+  reply = () => steps.shift()!();
+  const seen: string[] = [];
+  const done = await followCapture("c1", { onUpdate: (r) => seen.push(r.capture.status), everyMs: 1 });
+  assert.equal(done?.capture.status, "PROCESSED");
+  assert.deepEqual(seen, ["PROCESSING", "FAILED", "PROCESSED"], "a dropped connection just means asking again");
+  assert.ok(calls.every((c) => c.url === "/v1/captures/c1" && c.method === "GET"));
+});
+
+test("following ends without a result when the entry is gone, takes too long or is cancelled", async () => {
+  reply = () => json(404, { error: { code: "NOT_FOUND", message: "Capture not found." } });
+  assert.equal(await followCapture("c1", { onUpdate: () => undefined, everyMs: 1 }), null);
+
+  reply = () => saved("PROCESSING");
+  assert.equal(await followCapture("c1", { onUpdate: () => undefined, everyMs: 1, forMs: 20 }), null);
+
+  const stop = new AbortController();
+  calls = [];
+  const following = followCapture("c1", { onUpdate: () => undefined, signal: stop.signal, everyMs: 50 });
+  stop.abort();
+  assert.equal(await following, null);
+  assert.equal(calls.length, 0, "a cancelled follow asks nothing more");
 });

@@ -44,5 +44,16 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByText("I understood:")).toBeVisible();
       await expectAccessible(page);
     });
+
+    test("'Saved, understanding it' in the sheet and on Home meets WCAG 2 AA", async ({ page }) => {
+      await signUp(page);
+      // The demo AI's longest pause, so both scans finish while it's still being understood.
+      await tell(page, "Studied AI for 2 hours [slow 20]");
+      await expect(page.getByRole("dialog").getByRole("status")).toContainText("Understanding it…", { timeout: 3000 });
+      await expectAccessible(page);
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Understanding" })).toBeVisible();
+      await expectAccessible(page);
+    });
   });
 }

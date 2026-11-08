@@ -212,8 +212,16 @@ class TestCapturesSurviveFailures:
         db.expire_all()
         calls = len(fake_ai.calls)
 
-        again = send(client, auth, "Studied AI", client_id)
-        assert again["error"]["code"] == "STILL_PROCESSING" and again["error"]["retryable"]
+        again = client.post(
+            "/v1/captures",
+            json={"content": "Studied AI", "client_capture_id": client_id},
+            headers=auth,
+        )
+        # Accepted and still being understood: the app keeps waiting instead of resending.
+        assert again.status_code == 202
+        reply = again.json()
+        assert reply["capture"]["status"] == "PROCESSING" and reply["error"] is None
+        assert reply["message"] == "Saved. Understanding it…"
         assert len(fake_ai.calls) == calls
         retry = client.post(f"/v1/captures/{first['capture']['id']}/retry", headers=auth)
         assert retry.status_code == 409

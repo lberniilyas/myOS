@@ -51,8 +51,8 @@ jobs:
       TEST_DATABASE_URL: postgresql+psycopg://personal_os:personal_os@localhost:5432/personal_os_test
       AI_PROVIDER: none
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
       - name: Install
@@ -79,8 +79,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -112,12 +112,15 @@ jobs:
       DATABASE_URL: postgresql+psycopg://personal_os:personal_os@localhost:5432/personal_os_e2e
       AI_PROVIDER: demo
       E2E_BASE_URL: http://127.0.0.1:8000
+      # The background sweep looks every 2 s and waits seconds, not minutes, between retries.
+      CAPTURE_WORKER_INTERVAL_SECONDS: "2"
+      CAPTURE_RETRY_UNIT_SECONDS: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -141,7 +144,7 @@ jobs:
         run: python3 backend/scripts/smoke_test.py "$E2E_BASE_URL"
       - name: Keep the report, traces and server log of a failed run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-report
           path: |
@@ -154,9 +157,9 @@ jobs:
     name: Security and configuration
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: requirements.txt (what Render installs) matches uv.lock
@@ -188,7 +191,7 @@ jobs:
       group: deploy-production
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the smoke test checks that production runs this commit or a later one
       - name: Ask Render to deploy

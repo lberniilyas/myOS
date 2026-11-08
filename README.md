@@ -34,6 +34,10 @@ Over plain `http://`, iOS disables two things: offline loading and the in-app mi
 
 **Anywhere, over HTTPS (full features):** put the server behind an HTTPS address, for example [Tailscale](https://tailscale.com/) (`tailscale serve 8000`) or a Cloudflare quick tunnel (`cloudflared tunnel --url http://localhost:8000`), then add that address to your home screen. To have it work when your PC is off, deploy it to Vercel (next section).
 
+## How saving works
+
+When you tap **Save**, the app shows **Saved** as soon as your words are stored on the server; the AI understands them afterwards. The result appears in the open sheet, or on Home under **Understanding** if you closed it, and you can carry on with the next entry meanwhile. If the AI is busy or briefly down, the server tries again by itself, after 1, 5, 15 and 60 minutes. Only then does the entry move to **Not processed yet** on Home, with **Try again** and **Remove**. A failure no retry can fix (a rejected AI key, say) goes there at once. Entries written without a connection wait on the phone and go out as soon as it's back. On Vercel, which can't keep working after it has replied, saving waits for the AI instead, and the phone does the retrying.
+
 ## Deploy on Vercel
 
 Vercel serves the app over HTTPS and runs the backend as one Python function ([vercel.json](vercel.json), [api/index.py](api/index.py)). The database is a hosted PostgreSQL from Neon, which you add from inside Vercel. Both have free tiers.
@@ -78,7 +82,7 @@ Render never deploys on its own (`autoDeployTrigger: off`). Every push to `main`
 
 1. **Backend tests** on a real PostgreSQL, with lint, formatting, 85% minimum coverage, and migrations going up, down and up again.
 2. **Frontend** unit tests, type-check and build.
-3. **End-to-end tests** in WebKit (Safari's engine) at iPhone size, against a real server with a deterministic demo AI: sign-in, capture, offline sending, editing, deleting, tasks, projects, habits, and accessibility (WCAG 2 AA) on every screen in light and dark mode.
+3. **End-to-end tests** in WebKit (Safari's engine) at iPhone size, against a real server with a deterministic demo AI: sign-in, capture, instant saving with a slow or failing AI, offline sending, editing, deleting, tasks, projects, habits, and accessibility (WCAG 2 AA) on every screen in light and dark mode.
 4. **Security and configuration**: known vulnerabilities in Python and JavaScript packages, `requirements.txt` matching the lockfile, `render.yaml` matching Render's schema, valid workflow files.
 5. **Deploy**, only if all of the above passed: GitHub calls the deploy hook, waits until production reports the new commit at `/health`, then runs [backend/scripts/smoke_test.py](backend/scripts/smoke_test.py) against it. That check is read-only: the page, its assets, security headers, the database connection, sign-up closed to strangers, hidden API docs.
 
@@ -103,9 +107,10 @@ npm test                                         # the send queue and sign-in ru
 **End-to-end tests** drive the real app in WebKit at iPhone size. They need a server running with the demo AI, which answers a fixed set of English phrasings the same way every time (a public server refuses it). Create the database once with `createdb -h localhost -p 5433 -U personal_os personal_os_e2e`, then:
 
 ```powershell
-# terminal 1: a server on its own database, with the demo AI
+# terminal 1: a server on its own database, with the demo AI and a fast retry sweep
 cd backend
 $env:AI_PROVIDER = "demo"; $env:DATABASE_URL = "postgresql+psycopg://personal_os:personal_os@localhost:5433/personal_os_e2e"
+$env:CAPTURE_WORKER_INTERVAL_SECONDS = "2"; $env:CAPTURE_RETRY_UNIT_SECONDS = "1"
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
 

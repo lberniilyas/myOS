@@ -61,7 +61,8 @@ export type Clarification = {
 };
 
 export type CaptureResult = {
-  capture: { id: string; status: string; input_type: string; captured_at: string };
+  // will_retry: it failed, and the server will try again by itself shortly.
+  capture: { id: string; status: string; input_type: string; captured_at: string; will_retry?: boolean };
   message: string;
   events_created: EventSummary[];
   events_updated: { event: EventSummary; changes: string[] }[];
@@ -167,6 +168,7 @@ export type CaptureListItem = {
   captured_at: string;
   error_code: string | null;
   attempts: number;
+  will_retry: boolean;
 };
 
 export type DeletedEvent = EventSummary & { deleted_at: string };

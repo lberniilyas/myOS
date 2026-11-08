@@ -97,6 +97,9 @@ export async function api<T>(path: string, options: { method?: string; body?: un
 // --- offline capture queue -----------------------------------------------------------------
 
 const QUEUE_KEY = "pos.pending-captures";
+// The server replies as soon as the words are stored and understands them afterwards. Hosts
+// that can't work after replying (serverless) ignore the flag and reply in full.
+const CAPTURE_URL = "/v1/captures?background=true";
 
 export type PendingCapture = { client_capture_id: string; content: string; input_type: "TEXT" | "VOICE"; captured_at: string };
 
@@ -138,8 +141,9 @@ function worthRetrying(error: unknown): boolean {
 }
 
 /**
- * Send a capture. It stays in the local queue until the server has processed it, so a network
+ * Send a capture. It stays in the local queue until the server has it for good, so a network
  * failure, a server error or a busy AI never loses it; the queue resends it with the same id.
+ * Once stored, the server finishes it (and retries a busy AI) by itself.
  * Returns null when it is kept for later without any reply from the server.
  */
 export async function sendCapture(content: string, inputType: "TEXT" | "VOICE"): Promise<CaptureResult | null> {
@@ -151,7 +155,7 @@ export async function sendCapture(content: string, inputType: "TEXT" | "VOICE"):
   };
   writeQueue([...pendingCaptures(), item]);
   try {
-    const result = await api<CaptureResult>("/v1/captures", { method: "POST", body: item });
+    const result = await api<CaptureResult>(CAPTURE_URL, { method: "POST", body: item });
     if (!result.error?.retryable) dequeue(item.client_capture_id);
     return result;
   } catch (error) {
@@ -169,7 +173,7 @@ export function flushQueue(): Promise<number> {
     let sent = 0;
     for (const item of pendingCaptures()) {
       try {
-        const result = await api<CaptureResult>("/v1/captures", { method: "POST", body: item });
+        const result = await api<CaptureResult>(CAPTURE_URL, { method: "POST", body: item });
         if (result.error?.retryable) break;
         sent += 1;
       } catch (error) {
@@ -182,4 +186,48 @@ export function flushQueue(): Promise<number> {
     flushing = null;
   });
   return flushing;
+}
+
+// --- following a capture the server is still understanding --------------------------------
+
+/** The server has the words and is still working on them: understanding them now, or
+ * waiting to try a busy AI again. */
+export function stillWorking(result: CaptureResult): boolean {
+  const { status, will_retry } = result.capture;
+  return status === "CAPTURED" || status === "PROCESSING" || (status === "FAILED" && will_retry === true);
+}
+
+const pause = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
+/**
+ * Ask about a saved capture until the server is done with it, passing each new state to
+ * onUpdate. Resolves with the final result, or null if it is still being worked on after
+ * `forMs`, the wait was cancelled, or the capture is gone. A dropped connection only means
+ * asking again at the next turn.
+ */
+export async function followCapture(
+  id: string,
+  { onUpdate, signal, everyMs = 1500, forMs = 180_000 }: { onUpdate: (result: CaptureResult) => void; signal?: AbortSignal; everyMs?: number; forMs?: number },
+): Promise<CaptureResult | null> {
+  const deadline = Date.now() + forMs;
+  while (!signal?.aborted && Date.now() < deadline) {
+    await pause(everyMs, signal);
+    if (signal?.aborted) break;
+    try {
+      const result = await api<CaptureResult>(`/v1/captures/${id}`);
+      if (signal?.aborted) break;
+      onUpdate(result);
+      if (!stillWorking(result)) return result;
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 401)) return null;
+    }
+  }
+  return null;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, ApiError, flushQueue, pendingCaptures } from "../api";
 import { ClarificationCard, EventRow, navigate } from "../components";
@@ -45,6 +45,37 @@ function summaryRows(summary: DailySummary): Row[] {
   return rows;
 }
 
+const PENDING_URL = "/v1/captures?pending=true&limit=10";
+
+function excerpt(text: string | null): string {
+  const words = text ?? "";
+  return `“${words.slice(0, 140)}${words.length > 140 ? "…" : ""}”`;
+}
+
+/** Saved messages the server is still understanding, or will try again by itself. */
+function Understanding({ items }: { items: CaptureListItem[] }) {
+  return (
+    <>
+      <h2>Understanding</h2>
+      <div className="card" role="status">
+        {items.map((item) => (
+          <div className="notice" key={item.id}>
+            <p className="text">{excerpt(item.text)}</p>
+            {item.status === "FAILED" ? (
+              <p className="faint pending-line">Couldn't understand it yet; I'll try again shortly. Your words are saved.</p>
+            ) : (
+              <p className="faint pending-line">
+                <span className="spinner" aria-hidden="true" />
+                Saved. Understanding it…
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /** Messages the server couldn't turn into entries, with what can be done about each. */
 function NeedsAttention({ items, waiting, onChanged, notify }: { items: CaptureListItem[]; waiting: number; onChanged: () => void; notify: (text: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -84,7 +115,7 @@ function NeedsAttention({ items, waiting, onChanged, notify }: { items: CaptureL
         )}
         {items.map((item) => (
           <div className="notice" key={item.id}>
-            <p className="text">“{(item.text ?? "").slice(0, 140)}{(item.text ?? "").length > 140 ? "…" : ""}”</p>
+            <p className="text">{excerpt(item.text)}</p>
             <p className="faint" style={{ margin: "0 0 8px" }}>
               {failureReason(item.status === "PROCESSING" ? "STILL_PROCESSING" : item.error_code)} Your words are saved.
             </p>
@@ -125,6 +156,7 @@ export function Home({ user, onCapture, refreshKey, notify }: { user: User | nul
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [questions, setQuestions] = useState<Clarification[]>([]);
   const [unfinished, setUnfinished] = useState<CaptureListItem[]>([]);
+  const [pending, setPending] = useState<CaptureListItem[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [error, setError] = useState(false);
 
@@ -134,13 +166,16 @@ export function Home({ user, onCapture, refreshKey, notify }: { user: User | nul
       api<Clarification[]>("/v1/clarifications"),
       api<CaptureListItem[]>("/v1/captures?unfinished=true&limit=10"),
       api<Task[]>("/v1/tasks?open_only=true"),
+      api<CaptureListItem[]>(PENDING_URL),
     ])
-      .then(([daily, open, stuck, openTasks]) => {
+      .then(([daily, open, stuck, openTasks, working]) => {
         setSummary(daily);
         setQuestions(open);
         // Entries still in this phone's queue are being retried already; list them once, below.
         const queued = new Set(pendingCaptures().map((p) => p.client_capture_id));
-        setUnfinished(stuck.filter((c) => !c.client_capture_id || !queued.has(c.client_capture_id)));
+        const notQueued = (c: CaptureListItem) => !c.client_capture_id || !queued.has(c.client_capture_id);
+        setUnfinished(stuck.filter(notQueued));
+        setPending(working.filter(notQueued));
         setTasks(openTasks);
         setError(false);
       })
@@ -148,6 +183,25 @@ export function Home({ user, onCapture, refreshKey, notify }: { user: User | nul
   }, []);
 
   useEffect(load, [load, refreshKey]);
+
+  // While something is being understood, look again shortly; once any of it is done, reload
+  // everything so its entries appear. Retries the server schedules are checked less often.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  useEffect(() => {
+    if (!pending.length) return;
+    const soon = pending.some((item) => item.status !== "FAILED");
+    const timer = window.setTimeout(() => {
+      api<CaptureListItem[]>(PENDING_URL)
+        .then((now) => {
+          const still = new Set(now.map((item) => item.id));
+          if (pendingRef.current.some((item) => !still.has(item.id))) load();
+          else setPending(now);
+        })
+        .catch(() => setPending((items) => [...items])); // unreachable: look again later
+    }, soon ? 2500 : 30_000);
+    return () => window.clearTimeout(timer);
+  }, [pending, load]);
 
   const rows = summary ? summaryRows(summary) : [];
   const waiting = pendingCaptures().length;
@@ -178,6 +232,8 @@ export function Home({ user, onCapture, refreshKey, notify }: { user: User | nul
           </button>
         </p>
       )}
+
+      {pending.length > 0 && <Understanding items={pending} />}
 
       {(unfinished.length > 0 || waiting > 0) && <NeedsAttention items={unfinished} waiting={waiting} onChanged={load} notify={notify} />}
 

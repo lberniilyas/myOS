@@ -6,6 +6,8 @@ a failed capture can be retried later (spec #5 §28).
 
 import logging
 import time
+import uuid
+from collections.abc import Callable
 from datetime import timedelta
 
 from sqlalchemy import and_, func, or_, select, update
@@ -21,6 +23,7 @@ from app.captures.apply import AppliedChanges, apply_plan
 from app.captures.context import build_context, render_user_prompt
 from app.captures.models import Capture, Clarification
 from app.captures.planner import build_plan
+from app.captures.retries import will_retry
 from app.captures.schemas import (
     AnswerOut,
     CaptureCreate,
@@ -34,6 +37,7 @@ from app.captures.schemas import (
 )
 from app.captures.summary import build_message
 from app.clock import Clock
+from app.config import get_settings
 from app.core.enums import CaptureStatus, ClarificationKind
 from app.events.service import to_summary
 
@@ -41,7 +45,11 @@ logger = logging.getLogger(__name__)
 
 EXTRACTION_PROMPT_VERSION = "v1"
 DOUBLE_SUBMIT_WINDOW = timedelta(minutes=2)
+PENDING_MESSAGE = "Saved. Understanding it…"
 FAILURE_MESSAGE = "I couldn't process that yet. Your entry is saved and I'll try again shortly."
+STUCK_MESSAGE = (
+    "I couldn't process that. Your words are saved; it's on Home under “Not processed yet”."
+)
 # Longer than any single run can last (Vercel stops a function after 300 s), so a capture
 # still marked PROCESSING after this was cut off by a crash or timeout.
 STALE_PROCESSING = timedelta(minutes=10)
@@ -63,6 +71,17 @@ def clarification_out(item: Clarification) -> ClarificationOut:
     )
 
 
+def server_will_retry(capture: Capture) -> bool:
+    """The server's background sweep will run this failed capture again by itself."""
+    return not get_settings().serverless and will_retry(capture)
+
+
+def _failure_message(capture: Capture) -> str:
+    # Retried by the server's sweep, or (on serverless hosts) by the app's send queue.
+    app_retries = get_settings().serverless and capture.attempts < MAX_ATTEMPTS
+    return FAILURE_MESSAGE if server_will_retry(capture) or app_retries else STUCK_MESSAGE
+
+
 def _info(capture: Capture) -> CaptureInfo:
     return CaptureInfo(
         id=capture.id,
@@ -71,6 +90,7 @@ def _info(capture: Capture) -> CaptureInfo:
         captured_at=capture.captured_at,
         intent=capture.intent,
         language=capture.language,
+        will_retry=server_will_retry(capture),
     )
 
 
@@ -79,19 +99,19 @@ def stored_result(capture: Capture) -> CaptureResult:
         result = CaptureResult.model_validate(capture.result)
         result.capture = _info(capture)
         return result
+    if capture.processing_status in (CaptureStatus.CAPTURED, CaptureStatus.PROCESSING):
+        return CaptureResult(capture=_info(capture), message=PENDING_MESSAGE)
     error = None
-    if capture.processing_status == CaptureStatus.PROCESSING:
-        error = ErrorOut(
-            code="STILL_PROCESSING", message="This entry is still being processed.", retryable=True
-        )
-    elif capture.error_code:
+    if capture.error_code:
         error = ErrorOut(
             code=capture.error_code,
-            message=FAILURE_MESSAGE,
+            message=_failure_message(capture),
             retryable=capture.attempts < MAX_ATTEMPTS,
         )
     return CaptureResult(
-        capture=_info(capture), message=capture.response_text or FAILURE_MESSAGE, error=error
+        capture=_info(capture),
+        message=capture.response_text or _failure_message(capture),
+        error=error,
     )
 
 
@@ -124,9 +144,35 @@ def claim_for_retry(db: Session, capture: Capture) -> bool:
     return claimed == 1
 
 
-def submit_capture(
-    db: Session, user: User, payload: CaptureCreate, ai: AIProvider | None, clock: Clock
+def _run(
+    db: Session,
+    user: User,
+    capture: Capture,
+    ai: AIProvider | None,
+    clock: Clock,
+    later: Callable[[uuid.UUID], None] | None,
 ) -> CaptureResult:
+    """Understand a claimed capture now, or hand it to `later` and reply that it's saved."""
+    if later is None:
+        return process_capture(db, user, capture, ai, clock)
+    later(capture.id)
+    return stored_result(capture)
+
+
+def submit_capture(
+    db: Session,
+    user: User,
+    payload: CaptureCreate,
+    ai: AIProvider | None,
+    clock: Clock,
+    *,
+    later: Callable[[uuid.UUID], None] | None = None,
+) -> CaptureResult:
+    """Store what the person said, then understand it.
+
+    later: schedules the understanding after the reply (instant saving). It receives captures
+    already claimed (PROCESSING), so nothing else can pick them up meanwhile.
+    """
     now = clock.now()
     if payload.client_capture_id is not None:
         existing = db.scalar(
@@ -137,7 +183,7 @@ def submit_capture(
         if existing is not None:
             # The app resends what it couldn't get processed, so a resend doubles as a retry.
             if claim_for_retry(db, existing):
-                return process_capture(db, user, existing, ai, clock)
+                return _run(db, user, existing, ai, clock, later)
             return stored_result(existing)
     else:
         recent = db.scalar(
@@ -181,7 +227,9 @@ def submit_capture(
         if existing is None:
             raise
         return stored_result(existing)
-    return process_capture(db, user, capture, ai, clock)
+    if later is not None and not claim_for_retry(db, capture):
+        return stored_result(capture)  # pragma: no cover - a capture just stored is always free
+    return _run(db, user, capture, ai, clock, later)
 
 
 def _fail(db: Session, capture: Capture, code: str, detail: str, started: float) -> CaptureResult:
@@ -191,11 +239,11 @@ def _fail(db: Session, capture: Capture, code: str, detail: str, started: float)
     capture.error_code = code
     capture.error_detail = detail[:2000]
     capture.processing_ms = round((time.perf_counter() - started) * 1000)
-    capture.response_text = FAILURE_MESSAGE
+    capture.response_text = _failure_message(capture)
     db.commit()
     return CaptureResult(
         capture=_info(capture),
-        message=FAILURE_MESSAGE,
+        message=capture.response_text,
         error=ErrorOut(code=code, message=detail, retryable=retryable),
     )
 

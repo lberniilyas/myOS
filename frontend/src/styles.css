@@ -590,3 +590,46 @@ textarea.field {
 dl.card {
   margin: 0;
 }
+
+/* --- saved, still being understood -------------------------------------------------------- */
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.working-hint {
+  margin: 0;
+  padding: 0 16px 14px;
+}
+
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.pending-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-color: var(--accent);
+  }
+}

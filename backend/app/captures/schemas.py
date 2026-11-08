@@ -78,6 +78,8 @@ class CaptureInfo(BaseModel):
     captured_at: datetime
     intent: str | None
     language: str | None
+    # Failed, but the server will try again by itself.
+    will_retry: bool = False
 
 
 class AnswerOut(BaseModel):
@@ -116,3 +118,4 @@ class CaptureListItem(BaseModel):
     response_text: str | None
     error_code: str | None
     attempts: int
+    will_retry: bool

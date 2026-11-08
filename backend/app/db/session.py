@@ -1,4 +1,5 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,3 +29,8 @@ def get_db() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+def get_session_factory() -> Callable[[], AbstractContextManager[Session]]:
+    """FastAPI dependency: opens sessions for work that runs after the reply."""
+    return SessionLocal

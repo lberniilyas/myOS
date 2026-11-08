@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -10,13 +12,17 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import DataError, StatementError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.ai.provider import get_ai_provider
 from app.analytics.router import router as summary_router
 from app.areas.router import router as areas_router
 from app.assistant.router import router as assistant_router
 from app.auth.router import router as account_router
+from app.captures import worker
 from app.captures.router import router as captures_router
+from app.clock import get_clock
 from app.config import MISSING_DATABASE, get_settings
 from app.db import all_models  # noqa: F401  (registers models before first query)
+from app.db.session import SessionLocal
 from app.errors import AppError
 from app.events.router import router as events_router
 from app.goals.router import router as goals_router
@@ -55,7 +61,33 @@ def create_app() -> FastAPI:
     if not settings.database_configured:
         logger.error(MISSING_DATABASE)
     hide_docs = settings.is_production
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        sweep = None
+        if (
+            settings.capture_worker
+            and settings.background_captures
+            and settings.database_configured
+        ):
+            # Finishes captures a restart or a sleeping server interrupted, and retries failures.
+            sweep = asyncio.create_task(
+                worker.run_forever(
+                    SessionLocal,
+                    get_ai_provider,
+                    get_clock(),
+                    interval_seconds=settings.capture_worker_interval_seconds,
+                    retry_unit_seconds=settings.capture_retry_unit_seconds,
+                )
+            )
+        yield
+        if sweep is not None:
+            sweep.cancel()
+            with suppress(asyncio.CancelledError):
+                await sweep
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Personal OS",
         version="0.1.0",
         description="Tell the system what happened; it structures, connects and measures it.",
