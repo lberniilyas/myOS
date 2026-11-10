@@ -2,14 +2,15 @@
 a sweep finishes or retries anything a restart, a sleeping server or a busy AI interrupted."""
 
 import asyncio
+import time
 import uuid
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 
 import pytest
 from sqlalchemy import select, text
 
 from app.ai.provider import AIProviderError
-from app.captures import worker
+from app.captures import signals, worker
 from app.captures.models import Capture
 from app.captures.retries import AUTO_ATTEMPTS
 from app.config import get_settings
@@ -131,7 +132,7 @@ class TestTheSweep:
         age(db, capture_id, 0.5)
         assert worker.due_for_work(db, 60) == []  # the first pause is a minute
         age(db, capture_id, 1.5)
-        assert worker.sweep(sessions, fake_ai, clock, 60) == 1
+        assert worker.sweep(sessions, fake_ai, clock, 60) == (1, None)  # nothing left
         assert status_of(db, capture_id).processing_status == "PROCESSED"
 
     def test_pauses_grow_with_each_attempt(self, client, auth, fake_ai, db, sessions):
@@ -191,7 +192,7 @@ class TestTheSweep:
         age(db, never_started, 2)
         age(db, cut_off, 11)
         assert set(worker.due_for_work(db, 60)) == {uuid.UUID(never_started), uuid.UUID(cut_off)}
-        assert worker.sweep(sessions, fake_ai, clock, 60) == 2
+        assert worker.sweep(sessions, fake_ai, clock, 60)[0] == 2
         assert {status_of(db, c).processing_status for c in (never_started, cut_off)} == {
             "PROCESSED"
         }
@@ -207,34 +208,126 @@ class TestTheSweep:
         assert len(fake_ai.calls) == calls + 1
         assert len(db.scalars(select(Event)).all()) == 1
 
-    def test_the_loop_survives_a_failing_sweep(self, monkeypatch):
+    def test_it_knows_when_the_next_capture_is_due(self, client, auth, fake_ai, db, sessions):
+        assert worker.seconds_until_next(db, 60) is None  # nothing pending
+        needs_you = self._capture(client, auth, fake_ai, AIProviderError("AI_AUTH_FAILED", "key"))
+        assert worker.seconds_until_next(db, 60) is None  # waits for the person, not the sweep
+        busy = AIProviderError("AI_RATE_LIMITED", "busy", retryable=True)
+        capture_id = self._capture(client, auth, fake_ai, busy)
+        assert worker.seconds_until_next(db, 60) == 60  # the first retry, a minute after failing
+        age(db, capture_id, 2)
+        assert worker.seconds_until_next(db, 60) == 0  # overdue: now
+        assert needs_you != capture_id
+
+    def test_a_failure_wakes_the_sweep(self, client, auth, fake_ai, sessions):
+        nudges = []
+        signals.listen(lambda: nudges.append(1))
+        try:
+            self._capture(
+                client, auth, fake_ai, AIProviderError("AI_TIMEOUT", "slow", retryable=True)
+            )
+        finally:
+            signals.listen(None)
+        assert nudges == [1]
+
+    def test_a_broken_wake_up_never_breaks_saving(self, client, auth, fake_ai, db, sessions):
+        def broken():
+            raise RuntimeError("event loop is closed")
+
+        signals.listen(broken)
+        try:
+            capture_id = self._capture(
+                client, auth, fake_ai, AIProviderError("AI_TIMEOUT", "x", retryable=True)
+            )
+        finally:
+            signals.listen(None)
+        assert status_of(db, capture_id).processing_status == "FAILED"
+
+
+def _loop(**timing):
+    return worker.run_forever(
+        lambda: nullcontext(None), lambda: None, None, retry_unit_seconds=1, **timing
+    )
+
+
+async def _until(condition, seconds: float = 10) -> bool:
+    """Wait for the condition rather than a fixed time, so a busy machine can't fail a test."""
+    deadline = asyncio.get_running_loop().time() + seconds
+    while not condition() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    return condition()
+
+
+class TestTheLoop:
+    """The loop the server runs: it sleeps while there's nothing to do, so a hosted database
+    (Neon) can scale to zero even when the server is kept awake."""
+
+    def test_it_survives_a_failing_sweep(self, monkeypatch):
         runs = []
 
         def flaky_sweep(*args):
-            runs.append(len(runs))
+            runs.append(1)
             if len(runs) == 1:
                 raise RuntimeError("database briefly unreachable")
-            return 0
+            return 0, 0.0  # something is due: look again after the shortest pause
 
         monkeypatch.setattr(worker, "sweep", flaky_sweep)
 
-        async def run_until_three_sweeps():
-            loop = asyncio.create_task(
-                worker.run_forever(
-                    lambda: nullcontext(None),
-                    lambda: None,
-                    None,
-                    interval_seconds=0.01,
-                    retry_unit_seconds=1,
-                )
-            )
-            # Wait for the runs rather than a fixed time, so a busy machine can't fail it.
-            deadline = asyncio.get_running_loop().time() + 30
-            while len(runs) < 3 and asyncio.get_running_loop().time() < deadline:
-                await asyncio.sleep(0.01)
-            alive = not loop.done()
-            loop.cancel()
-            return alive
+        async def scenario():
+            task = asyncio.create_task(_loop(interval_seconds=0.01, idle_seconds=30))
+            kept_going = await _until(lambda: len(runs) >= 3)
+            alive = not task.done()
+            task.cancel()
+            return kept_going and alive
 
-        assert asyncio.run(run_until_three_sweeps()), "the loop stopped"
-        assert len(runs) >= 3  # it kept going after the first sweep failed
+        assert asyncio.run(scenario()), "the loop stopped after a failed sweep"
+
+    def test_with_nothing_pending_it_waits_until_a_capture_fails(self, monkeypatch):
+        runs = []
+        monkeypatch.setattr(worker, "sweep", lambda *args: runs.append(1) or (0, None))
+
+        async def scenario():
+            task = asyncio.create_task(_loop(interval_seconds=0.01, idle_seconds=30))
+            await _until(lambda: len(runs) >= 1)
+            await asyncio.sleep(0.5)
+            while_idle = len(runs)
+            signals.changed()  # what the pipeline does when a capture fails
+            woke = await _until(lambda: len(runs) >= 2)
+            task.cancel()
+            return while_idle, woke
+
+        while_idle, woke = asyncio.run(scenario())
+        assert while_idle == 1, "an idle loop kept querying the database"
+        assert woke, "a failed capture didn't wake the loop"
+
+    def test_it_sleeps_until_the_next_retry_is_due(self, monkeypatch):
+        sweeps: list[float] = []
+
+        def sweep(*args):
+            sweeps.append(time.monotonic())
+            return 0, 0.3  # the next retry is due in 0.3 s
+
+        monkeypatch.setattr(worker, "sweep", sweep)
+
+        async def scenario():
+            task = asyncio.create_task(_loop(interval_seconds=0.01, idle_seconds=30))
+            done = await _until(lambda: len(sweeps) >= 3)
+            task.cancel()
+            return done
+
+        assert asyncio.run(scenario()), "it didn't wake for the due retry"
+        gaps = [later - earlier for earlier, later in zip(sweeps, sweeps[1:], strict=False)]
+        assert all(gap >= 0.25 for gap in gaps), gaps  # not before it was due
+
+    def test_it_stops_listening_when_the_server_stops(self, monkeypatch):
+        monkeypatch.setattr(worker, "sweep", lambda *args: (0, None))
+
+        async def scenario():
+            task = asyncio.create_task(_loop(interval_seconds=0.01, idle_seconds=30))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        asyncio.run(scenario())
+        assert signals._listener is None

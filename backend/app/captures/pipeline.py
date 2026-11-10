@@ -19,6 +19,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider, AIProviderError
 from app.assistant.service import answer_question
 from app.auth.models import User
+from app.captures import signals
 from app.captures.apply import AppliedChanges, apply_plan
 from app.captures.context import build_context, render_user_prompt
 from app.captures.models import Capture, Clarification
@@ -241,6 +242,7 @@ def _fail(db: Session, capture: Capture, code: str, detail: str, started: float)
     capture.processing_ms = round((time.perf_counter() - started) * 1000)
     capture.response_text = _failure_message(capture)
     db.commit()
+    signals.changed()  # the sweep plans a retry, if this failure gets one
     return CaptureResult(
         capture=_info(capture),
         message=capture.response_text,

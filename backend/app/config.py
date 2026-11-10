@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Understanding captures after the reply, and the sweep that recovers unfinished ones.
     # Switched off only in tests, which run the sweep by hand.
     capture_worker: bool = True
+    # The shortest pause between sweeps; with nothing pending it waits up to 3 hours.
     capture_worker_interval_seconds: float = 60.0
     # Retry pauses are 1, 5, 15 and 60 of these (seconds); tests make them short.
     capture_retry_unit_seconds: float = 60.0
