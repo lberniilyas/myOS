@@ -102,3 +102,28 @@ class TokenResponse(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     password: str
+
+
+class AccessKeyCreate(BaseModel):
+    name: str = Field(default="iPhone Shortcut", max_length=100, description="Where it's used.")
+
+    @field_validator("name")
+    @classmethod
+    def _named(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Give the key a name, such as 'iPhone Shortcut'.")
+        return value.strip()
+
+
+class AccessKeyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    hint: str = Field(description="The key's last 4 characters.")
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class AccessKeyCreated(AccessKeyOut):
+    key: str = Field(description="Shown this once; only a hash is stored.")

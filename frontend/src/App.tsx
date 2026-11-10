@@ -12,6 +12,7 @@ import { Knowledge } from "./screens/Knowledge";
 import { Login } from "./screens/Login";
 import { Me } from "./screens/Me";
 import { Project } from "./screens/Project";
+import { Shortcuts } from "./screens/Shortcuts";
 import { Tasks } from "./screens/Tasks";
 import { Timeline } from "./screens/Timeline";
 import type { User } from "./types";
@@ -96,6 +97,9 @@ export function App() {
     tab = "me";
   } else if (section === "deleted") {
     screen = <Deleted notify={setToast} onChanged={refresh} />;
+    tab = "me";
+  } else if (section === "shortcuts") {
+    screen = <Shortcuts notify={setToast} />;
     tab = "me";
   } else if (section === "tasks") {
     screen = <Tasks notify={setToast} />;

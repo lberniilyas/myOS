@@ -34,14 +34,14 @@ test("an entry is confirmed at once, even while the AI takes its time", async ({
 
 test("closing the sheet early loses nothing: Home shows it until it's understood", async ({ page }) => {
   await signUp(page);
-  await tell(page, "Studied biology for 1 hour [slow 5]");
+  await tell(page, "Studied biology for 1 hour [slow 10]");
   await expect(sheet(page).getByRole("status")).toContainText("Saved. Understanding it…", { timeout: 3000 });
   await closeSheet(page);
 
   const understanding = page.getByRole("heading", { name: "Understanding" });
   await expect(understanding).toBeVisible();
-  await expect(page.getByText("“Studied biology for 1 hour [slow 5]”")).toBeVisible();
-  await expect(understanding).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText("“Studied biology for 1 hour [slow 10]”")).toBeVisible();
+  await expect(understanding).toHaveCount(0, { timeout: 30_000 });
   await expect(page.getByText("biology study")).toBeVisible();
 });
 
@@ -104,7 +104,7 @@ test("an entry written while the server is unreachable is kept and sent later", 
 test("Send now delivers what's waiting on the phone, and Home shows it understood", async ({ page }) => {
   await signUp(page);
   await page.route("**/v1/captures*", (route) => (route.request().method() === "POST" ? route.abort() : route.fallback()));
-  await tell(page, "Studied economics for 1 hour [slow 3]");
+  await tell(page, "Studied economics for 1 hour [slow 10]");
   await expect(page.getByText("Saved for later")).toBeVisible();
   await closeSheet(page);
 
@@ -113,7 +113,7 @@ test("Send now delivers what's waiting on the phone, and Home shows it understoo
   await expect(page.getByText("Sent 1 entry.")).toBeVisible();
   await expect(page.getByText("waiting on this phone")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Understanding" })).toBeVisible();
-  await expect(page.getByText("economics study")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("economics study")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Understanding" })).toHaveCount(0);
 });
 

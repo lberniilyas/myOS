@@ -46,3 +46,25 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AccessKey(Base):
+    """A personal key for sending entries from outside the app (an iPhone Shortcut, Siri).
+
+    It can only send captures: the rest of the account needs a signed-in session. Only a hash
+    is stored; the key itself is shown once, when it's created.
+    """
+
+    __tablename__ = "access_keys"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    # The key's last characters, so the person can tell keys apart.
+    hint: Mapped[str] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

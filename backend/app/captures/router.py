@@ -6,7 +6,7 @@ from sqlalchemy import and_, exists, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.provider import AIProvider, get_ai_provider
-from app.auth.deps import get_current_user
+from app.auth.deps import get_capture_user, get_current_user
 from app.auth.models import User
 from app.captures import pipeline, worker
 from app.captures.clarifications import answer_clarification, dismiss_clarification
@@ -45,13 +45,16 @@ def create_capture(
             "GET /v1/captures/{id}. Ignored on serverless hosts, which can't work after replying."
         ),
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_capture_user),
     db: Session = Depends(get_db),
     ai: AIProvider | None = Depends(get_ai_provider),
     clock: Clock = Depends(get_clock),
     sessions: SessionFactory = Depends(get_session_factory),
 ) -> CaptureResult:
-    """Tell the system what happened. Returns what was recorded, in one short reply."""
+    """Tell the system what happened. Returns what was recorded, in one short reply.
+
+    Accepts the app's session or a personal access key (an iPhone Shortcut, Siri).
+    """
     later = None
     if background and get_settings().background_captures:
 

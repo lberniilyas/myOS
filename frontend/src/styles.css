@@ -633,3 +633,56 @@ dl.card {
     border-color: var(--accent);
   }
 }
+
+/* --- Siri & Shortcuts ------------------------------------------------------------------- */
+
+.copy-field {
+  margin: 10px 0;
+}
+
+.copy-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.copy-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.copy-row .field {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.mono,
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px;
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 22px;
+  line-height: 1.5;
+}
+
+.steps > li + li {
+  margin-top: 12px;
+}
+
+.steps ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

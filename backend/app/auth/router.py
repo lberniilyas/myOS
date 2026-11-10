@@ -1,11 +1,16 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
-from app.auth import service
+from app.auth import keys, service
 from app.auth.deps import AuthContext, get_auth, get_current_user
 from app.auth.export import export_user_data
 from app.auth.models import User
 from app.auth.schemas import (
+    AccessKeyCreate,
+    AccessKeyCreated,
+    AccessKeyOut,
     DeleteAccountRequest,
     LoginRequest,
     RefreshRequest,
@@ -96,4 +101,32 @@ def delete_me(
     service.verify_user_password(user, payload.password)
     db.delete(user)
     db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/me/keys", response_model=list[AccessKeyOut])
+def list_keys(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Your personal access keys (Shortcuts, Siri). The keys themselves are never shown again."""
+    return keys.active_keys(db, user)
+
+
+@router.post("/me/keys", response_model=AccessKeyCreated, status_code=201)
+def create_key(
+    payload: AccessKeyCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AccessKeyCreated:
+    """A key that can only send entries, for an iPhone Shortcut or Siri. Shown once."""
+    key, secret = keys.create_key(db, user, payload.name)
+    return AccessKeyCreated(**AccessKeyOut.model_validate(key).model_dump(), key=secret)
+
+
+@router.delete("/me/keys/{key_id}", status_code=204)
+def revoke_key(
+    key_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    clock: Clock = Depends(get_clock),
+) -> Response:
+    keys.revoke_key(db, user, key_id, clock)
     return Response(status_code=204)

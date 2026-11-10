@@ -177,6 +177,10 @@ export function Me({ user, onUser, notify }: { user: User | null; onUser: (user:
         <OpenRow to="/deleted" label="Recently deleted" sub="Restore or erase deleted entries" />
       </Section>
 
+      <Section title="Connect">
+        <OpenRow to="/shortcuts" label="Siri & Shortcuts" sub="Send entries without opening the app" />
+      </Section>
+
       <Section title="Projects">
         {projects.map((p) => (
           <OpenRow

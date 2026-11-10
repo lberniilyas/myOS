@@ -171,6 +171,9 @@ export type CaptureListItem = {
   will_retry: boolean;
 };
 
+export type AccessKey = { id: string; name: string; hint: string; created_at: string; last_used_at: string | null };
+export type NewAccessKey = AccessKey & { key: string };
+
 export type DeletedEvent = EventSummary & { deleted_at: string };
 export type Knowledge = {
   id: string;

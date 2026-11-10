@@ -21,6 +21,12 @@ class CaptureCreate(BaseModel):
         default=None, description="When the user made the capture (with offset)."
     )
 
+    @field_validator("input_type", mode="before")
+    @classmethod
+    def _any_case(cls, value: object) -> object:
+        # Typed by hand in Shortcuts, where "voice" is as likely as "VOICE".
+        return value.strip().upper() if isinstance(value, str) else value
+
     @field_validator("content")
     @classmethod
     def _not_blank(cls, value: str) -> str:

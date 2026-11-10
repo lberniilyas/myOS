@@ -22,14 +22,14 @@ import urllib.request
 TIMEOUT = 30
 
 
-def request(url: str, method: str = "GET", body: dict | None = None) -> tuple[int, dict, bytes]:
+def request(
+    url: str, method: str = "GET", body: dict | None = None, token: str | None = None
+) -> tuple[int, dict, bytes]:
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json", "User-Agent": "personal-os-smoke-test"},
-    )
+    headers = {"Content-Type": "application/json", "User-Agent": "personal-os-smoke-test"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as response:
             return response.status, dict(response.headers), response.read()
@@ -144,6 +144,18 @@ def main() -> int:
     check(
         "the server reads its database (unknown sign-in is refused)",
         status == 401 and as_json(raw).get("error", {}).get("code") == "INVALID_CREDENTIALS",
+        f"HTTP {status} {raw[:120]!r}",
+    )
+
+    status, _, raw = request(
+        f"{base}/v1/captures?background=true",
+        "POST",
+        {"content": "smoke test", "input_type": "VOICE"},
+        token="pos_key_smoke-test-not-a-real-key-0000000000000000",
+    )
+    check(
+        "Shortcut keys are checked (a made-up key is refused)",
+        status == 401 and as_json(raw).get("error", {}).get("code") == "INVALID_KEY",
         f"HTTP {status} {raw[:120]!r}",
     )
 

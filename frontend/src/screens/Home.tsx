@@ -161,25 +161,27 @@ export function Home({ user, onCapture, refreshKey, notify }: { user: User | nul
   const [error, setError] = useState(false);
 
   const load = useCallback(() => {
-    Promise.all([
-      api<DailySummary>("/v1/summary/daily"),
-      api<Clarification[]>("/v1/clarifications"),
-      api<CaptureListItem[]>("/v1/captures?unfinished=true&limit=10"),
-      api<Task[]>("/v1/tasks?open_only=true"),
-      api<CaptureListItem[]>(PENDING_URL),
-    ])
-      .then(([daily, open, stuck, openTasks, working]) => {
-        setSummary(daily);
-        setQuestions(open);
-        // Entries still in this phone's queue are being retried already; list them once, below.
-        const queued = new Set(pendingCaptures().map((p) => p.client_capture_id));
-        const notQueued = (c: CaptureListItem) => !c.client_capture_id || !queued.has(c.client_capture_id);
-        setUnfinished(stuck.filter(notQueued));
-        setPending(working.filter(notQueued));
-        setTasks(openTasks);
-        setError(false);
-      })
-      .catch(() => setError(true));
+    (async () => {
+      // What's still being understood is read first. Anything that isn't in it has finished,
+      // so the summary read next already includes it: an entry finishing mid-load can't fall
+      // between the two and vanish from Home.
+      const working = await api<CaptureListItem[]>(PENDING_URL);
+      const [daily, open, stuck, openTasks] = await Promise.all([
+        api<DailySummary>("/v1/summary/daily"),
+        api<Clarification[]>("/v1/clarifications"),
+        api<CaptureListItem[]>("/v1/captures?unfinished=true&limit=10"),
+        api<Task[]>("/v1/tasks?open_only=true"),
+      ]);
+      setSummary(daily);
+      setQuestions(open);
+      // Entries still in this phone's queue are being retried already; list them once, below.
+      const queued = new Set(pendingCaptures().map((p) => p.client_capture_id));
+      const notQueued = (c: CaptureListItem) => !c.client_capture_id || !queued.has(c.client_capture_id);
+      setUnfinished(stuck.filter(notQueued));
+      setPending(working.filter(notQueued));
+      setTasks(openTasks);
+      setError(false);
+    })().catch(() => setError(true));
   }, []);
 
   useEffect(load, [load, refreshKey]);

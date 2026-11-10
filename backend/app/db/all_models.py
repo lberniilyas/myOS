@@ -1,7 +1,7 @@
 """Import every model so SQLAlchemy can resolve relationships and Alembic sees all tables."""
 
 from app.areas.models import Area
-from app.auth.models import AuthSession, User
+from app.auth.models import AccessKey, AuthSession, User
 from app.captures.models import Capture, Clarification, Source
 from app.events.models import (
     Event,
@@ -19,6 +19,7 @@ from app.projects.models import Project, ProjectAlias, project_goals
 from app.tasks.models import Task
 
 __all__ = [
+    "AccessKey",
     "Area",
     "AuthSession",
     "Capture",

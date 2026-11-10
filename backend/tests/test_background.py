@@ -218,7 +218,7 @@ class TestTheSweep:
 
         monkeypatch.setattr(worker, "sweep", flaky_sweep)
 
-        async def run_a_little():
+        async def run_until_three_sweeps():
             loop = asyncio.create_task(
                 worker.run_forever(
                     lambda: nullcontext(None),
@@ -228,8 +228,13 @@ class TestTheSweep:
                     retry_unit_seconds=1,
                 )
             )
-            await asyncio.sleep(0.2)
+            # Wait for the runs rather than a fixed time, so a busy machine can't fail it.
+            deadline = asyncio.get_running_loop().time() + 30
+            while len(runs) < 3 and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.01)
+            alive = not loop.done()
             loop.cancel()
+            return alive
 
-        asyncio.run(run_a_little())
+        assert asyncio.run(run_until_three_sweeps()), "the loop stopped"
         assert len(runs) >= 3  # it kept going after the first sweep failed
