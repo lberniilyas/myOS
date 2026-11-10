@@ -171,6 +171,29 @@ export type CaptureListItem = {
   will_retry: boolean;
 };
 
+export type Measure = { value: number; display: string | null };
+export type ReviewMetric = {
+  key: string;
+  label: string;
+  kind: "time" | "money" | "count";
+  currency: string | null;
+  this_week: Measure;
+  last_week: Measure;
+  average: Measure | null;
+  change: string | null;
+  direction: "up" | "down" | "same";
+  note: string | null;
+};
+export type WeeklyReview = {
+  week: { start: string; end: string; is_current: boolean; days_counted: number; compared_through: string | null };
+  previous_week: string;
+  next_week: string | null;
+  weeks_in_average: number;
+  metrics: ReviewMetric[];
+  habits: { habit_id: string; name: string; frequency: string; completed: number; target: number | null; display: string }[];
+  observations: { text: string; metric: string | null }[];
+};
+
 export type AccessKey = { id: string; name: string; hint: string; created_at: string; last_used_at: string | null };
 export type NewAccessKey = AccessKey & { key: string };
 

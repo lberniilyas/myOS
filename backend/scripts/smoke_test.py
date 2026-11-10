@@ -147,6 +147,12 @@ def main() -> int:
         f"HTTP {status} {raw[:120]!r}",
     )
 
+    status, _, raw = request(f"{base}/v1/review/weekly")
+    check(
+        "the weekly review exists and needs signing in",
+        status == 401 and as_json(raw).get("error", {}).get("code") == "NOT_AUTHENTICATED",
+        f"HTTP {status}",
+    )
     status, _, raw = request(
         f"{base}/v1/captures?background=true",
         "POST",

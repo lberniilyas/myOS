@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.analytics.review import WeeklyReview, weekly_review
 from app.analytics.service import daily_summary
 from app.auth.deps import get_current_user
 from app.auth.models import User
@@ -42,6 +43,23 @@ def summary_daily(
         to_summary(e, user.timezone).model_dump(mode="json") for e in recent
     ]
     return summary
+
+
+@router.get("/review/weekly", response_model=WeeklyReview)
+def review_weekly(
+    week: date | None = Query(
+        default=None, description="Any day in the week to review; this week by default."
+    ),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    clock: Clock = Depends(get_clock),
+) -> WeeklyReview:
+    """A week against last week and your 4-week average, with what stands out.
+
+    Numbers come from your records and the observations from fixed rules, never from the AI.
+    """
+    today = local_today(user.timezone, clock)
+    return weekly_review(db, user.id, user.week_start, today, week)
 
 
 class SearchResults(BaseModel):

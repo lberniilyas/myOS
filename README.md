@@ -38,6 +38,12 @@ Over plain `http://`, iOS disables two things: offline loading and the in-app mi
 
 When you tap **Save**, the app shows **Saved** as soon as your words are stored on the server; the AI understands them afterwards. The result appears in the open sheet, or on Home under **Understanding** if you closed it, and you can carry on with the next entry meanwhile. If the AI is busy or briefly down, the server tries again by itself, after 1, 5, 15 and 60 minutes. Only then does the entry move to **Not processed yet** on Home, with **Try again** and **Remove**. A failure no retry can fix (a rejected AI key, say) goes there at once. Entries written without a connection wait on the phone and go out as soon as it's back. On Vercel, which can't keep working after it has replied, saving waits for the AI instead, and the phone does the retrying.
 
+## Weekly review
+
+**Insights** opens on your week: study, project work, spending (per currency, never added across currencies) and habit check-ins. Each is set against last week and your average week, and up to three observations say what stands out, each with the numbers behind it ("Study is up 50% on your 4-week average by Wednesday: 6h against 4h."). Use ‹ and › to look at earlier weeks.
+
+The review is computed from your records with fixed rules and thresholds; no AI is involved, so the same records always give the same review. A week in progress is compared fairly: on a Wednesday, earlier weeks are counted up to their Wednesday too. Averages only cover weeks since you started recording. Entries without a duration are pointed out, since they make a total look smaller than it was.
+
 ## Siri, the Action button and Shortcuts
 
 You can send an entry without opening the app: "Hey Siri, Tell my system", the Action button, Back Tap, or an icon on the home screen. In the app, open **Me → Siri & Shortcuts**, create a key and follow the steps shown there. The Shortcut dictates your words, sends them to your system, and speaks the reply ("Saved. Understanding it…").
@@ -88,9 +94,9 @@ Render never deploys on its own (`autoDeployTrigger: off`). Every push to `main`
 
 1. **Backend tests** on a real PostgreSQL, with lint, formatting, 85% minimum coverage, and migrations going up, down and up again.
 2. **Frontend** unit tests, type-check and build.
-3. **End-to-end tests** in WebKit (Safari's engine) at iPhone size, against a real server with a deterministic demo AI: sign-in, capture, instant saving with a slow or failing AI, offline sending, a Siri Shortcut sending with its key (and refused once the key is revoked), editing, deleting, tasks, projects, habits, and accessibility (WCAG 2 AA) on every screen in light and dark mode.
+3. **End-to-end tests** in WebKit (Safari's engine) at iPhone size, against a real server with a deterministic demo AI: sign-in, capture, instant saving with a slow or failing AI, offline sending, a Siri Shortcut sending with its key (and refused once the key is revoked), the weekly review and its week navigation, editing, deleting, tasks, projects, habits, and accessibility (WCAG 2 AA) on every screen in light and dark mode.
 4. **Security and configuration**: known vulnerabilities in Python and JavaScript packages, `requirements.txt` matching the lockfile, `render.yaml` matching Render's schema, valid workflow files.
-5. **Deploy**, only if all of the above passed: GitHub calls the deploy hook, waits until production reports the new commit at `/health`, then runs [backend/scripts/smoke_test.py](backend/scripts/smoke_test.py) against it. That check is read-only: the page, its assets, security headers, the database connection, Shortcut keys checked, sign-up closed to strangers, hidden API docs.
+5. **Deploy**, only if all of the above passed: GitHub calls the deploy hook, waits until production reports the new commit at `/health`, then runs [backend/scripts/smoke_test.py](backend/scripts/smoke_test.py) against it. That check is read-only: the page, its assets, security headers, the database connection, the weekly review, Shortcut keys checked, sign-up closed to strangers, hidden API docs.
 
 If any step fails, nothing is deployed and GitHub emails you. If the check after a deploy fails, Render keeps serving, so roll back in Render (**Events → a previous deploy → Rollback**) and push a fix. You can run the same check by hand at any time: `cd backend; .\.venv\Scripts\python.exe scripts\smoke_test.py https://<your-service>.onrender.com --production`.
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError } from "../api";
 import type { DailySummary } from "../types";
+import { WeekReview } from "./WeekReview";
 
 const SUGGESTIONS = [
   "How much did I study this week?",
@@ -65,6 +66,9 @@ export function Insights() {
   return (
     <>
       <h1>Insights</h1>
+      <WeekReview />
+
+      <h2>Ask</h2>
       <form
         className="stack"
         onSubmit={(e) => {

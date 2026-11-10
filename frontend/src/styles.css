@@ -686,3 +686,70 @@ code {
   margin: 6px 0 0;
   padding-left: 18px;
 }
+
+/* --- weekly review ---------------------------------------------------------------------- */
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.week-nav h2 {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.week-nav .chip {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.card-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.observations {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.45;
+}
+
+.observations li + li {
+  margin-top: 8px;
+}
+
+.row .sub.wrap {
+  white-space: normal;
+}
+
+.value-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+}
+
+.change {
+  font-size: 13px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
