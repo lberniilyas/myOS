@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
 import type { ReviewMetric, WeeklyReview } from "../types";
@@ -36,15 +36,27 @@ export function WeekReview() {
   const [review, setReview] = useState<WeeklyReview | null>(null);
   const [thisWeek, setThisWeek] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const latest = useRef(0);
 
+  // The arrows wait for the week on screen to load, so a quick double tap moves two weeks
+  // instead of reusing the old week's "next". An answer for a week already left is ignored.
   const load = useCallback(() => {
+    const request = ++latest.current;
+    setLoading(true);
     api<WeeklyReview>(`/v1/review/weekly${week ? `?week=${week}` : ""}`)
       .then((data) => {
+        if (request !== latest.current) return;
         setReview(data);
         if (data.week.is_current) setThisWeek(data.week.start);
         setFailed(false);
       })
-      .catch(() => setFailed(true));
+      .catch(() => {
+        if (request === latest.current) setFailed(true);
+      })
+      .finally(() => {
+        if (request === latest.current) setLoading(false);
+      });
   }, [week]);
 
   useEffect(load, [load]);
@@ -63,9 +75,9 @@ export function WeekReview() {
 
   const heading = title(review, thisWeek);
   return (
-    <section aria-labelledby="week-title" className="week-review">
+    <section aria-labelledby="week-title" aria-busy={loading} className="week-review">
       <div className="week-nav">
-        <button className="chip" aria-label="Previous week" onClick={() => setWeek(review.previous_week)}>
+        <button className="chip" aria-label="Previous week" disabled={loading} onClick={() => setWeek(review.previous_week)}>
           ‹
         </button>
         <h2 id="week-title">
@@ -74,7 +86,7 @@ export function WeekReview() {
         <button
           className="chip"
           aria-label="Next week"
-          disabled={!review.next_week}
+          disabled={loading || !review.next_week}
           onClick={() => review.next_week && setWeek(review.next_week === thisWeek ? null : review.next_week)}
         >
           ›

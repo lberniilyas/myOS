@@ -62,6 +62,26 @@ test("you can step back through earlier weeks and return", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Next week" })).toBeDisabled();
 });
 
+test("a quick double tap on the arrows moves two weeks, even on a slow connection", async ({ page }) => {
+  await signUp(page);
+  const thisWeek = await seedWeeks(page);
+  // Every week arrives late, so the second tap lands while the first week is still loading.
+  await page.route("**/v1/review/weekly*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.fallback();
+  });
+  await page.getByRole("button", { name: "Insights", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /^This week · / })).toBeVisible();
+
+  await page.getByRole("button", { name: "Previous week" }).click();
+  await page.getByRole("button", { name: "Previous week" }).click();
+  const twoWeeksBack = await page.evaluate(
+    (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+    shift(thisWeek, -14),
+  );
+  await expect(page.getByRole("heading", { name: /^Week of / })).toContainText(twoWeeksBack);
+});
+
 test("a new account sees its numbers without invented comparisons", async ({ page }) => {
   await signUp(page);
   await page.getByRole("button", { name: "Insights", exact: true }).click();
