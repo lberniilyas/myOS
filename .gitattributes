@@ -1,0 +1,5 @@
+# Files read by Linux tools keep Unix line endings even in a Windows checkout, because a deploy
+# from this PC (railway up) uploads the working copy as it is.
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.sh text eol=lf

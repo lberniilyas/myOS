@@ -10,7 +10,9 @@ export default defineConfig({
   workers: 2,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
+  // On GitHub, each failure also becomes an annotation: the test's name and error, readable on
+  // the run's page without downloading the report.
+  reporter: process.env.CI ? [["list"], ["github"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:8000",
     // The offline worker would answer some requests itself and hide them from route mocks.
