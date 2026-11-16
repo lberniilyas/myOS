@@ -77,3 +77,20 @@ class TestHealth:
         get_settings.cache_clear()
         assert client.get("/health").json()["release"] == "9fdc53dcc87b"
         get_settings.cache_clear()
+
+    def test_reports_railways_commit(self, client, monkeypatch):
+        monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "54c721b141da")
+        get_settings.cache_clear()
+        assert client.get("/health").json()["release"] == "54c721b141da"
+        get_settings.cache_clear()
+
+    def test_reports_the_commit_written_by_the_deploy_job(self, client, monkeypatch, tmp_path):
+        # A CLI upload carries no commit, so the deploy job writes it into backend/RELEASE.
+        import app.config as config
+
+        release = tmp_path / "RELEASE"
+        release.write_text("b9235d68012d25055d4c9a2035bc496adec04d67\n")
+        monkeypatch.setattr(config, "RELEASE_FILE", release)
+        assert client.get("/health").json()["release"] == "b9235d68012d25055d4c9a2035bc496adec04d67"
+        release.write_text("  \n")  # an empty file means unknown
+        assert client.get("/health").json()["release"] == "dev"

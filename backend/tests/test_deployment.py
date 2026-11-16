@@ -56,6 +56,25 @@ class TestPublicDeployment:
         get_settings.cache_clear()
         assert response.json()["error"]["code"] == "REGISTRATION_CLOSED"
 
+    def test_railway_counts_as_production_too(self, client, monkeypatch):
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")  # set by Railway
+        get_settings.cache_clear()
+        response = sign_up(client, "stranger@example.com")
+        get_settings.cache_clear()
+        assert response.json()["error"]["code"] == "REGISTRATION_CLOSED"
+
+    def test_on_railway_the_app_sends_security_headers_and_hides_the_docs(self, monkeypatch):
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+        get_settings.cache_clear()
+        with TestClient(create_app()) as client:
+            headers = client.get("/health").headers
+            assert "frame-ancestors 'none'" in headers["content-security-policy"]
+            assert headers["x-frame-options"] == "DENY"
+            # Unknown pages fall through to the web app, so judge by content, like the smoke test.
+            assert "swagger" not in client.get("/docs").text.lower()
+            assert '"openapi"' not in client.get("/openapi.json").text
+        get_settings.cache_clear()
+
     def test_the_app_sends_security_headers_when_it_serves_the_pages(self, monkeypatch):
         monkeypatch.setenv("RENDER", "true")
         get_settings.cache_clear()

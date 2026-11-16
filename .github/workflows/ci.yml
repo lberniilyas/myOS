@@ -3,7 +3,8 @@
 #
 #   backend ──┐
 #   frontend ─┤
-#   e2e ──────┼──> deploy (main only): Render deploy hook -> wait for the new commit -> smoke test
+#   e2e ──────┤
+#   container ┼──> deploy (main only): Render deploy hook -> wait for the new commit -> smoke test
 #   checks ───┘
 #
 # One-time setup: the RENDER_DEPLOY_HOOK_URL secret (README, "Deploy on Render").
@@ -153,6 +154,42 @@ jobs:
             ${{ runner.temp }}/server.log
           retention-days: 14
 
+  container:
+    name: Container image (what production runs)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: personal_os
+          POSTGRES_PASSWORD: personal_os
+          POSTGRES_DB: personal_os_container
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U personal_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image from the Dockerfile
+        run: |
+          echo "$GITHUB_SHA" > backend/RELEASE
+          docker build --tag personal-os:ci .
+      - name: Start it as production does (migrations on start, sign-up closed, no AI key)
+        run: |
+          docker run --detach --name app --network host \
+            --env PORT=8080 \
+            --env RAILWAY_ENVIRONMENT_NAME=production \
+            --env DATABASE_URL=postgresql+psycopg://personal_os:personal_os@localhost:5432/personal_os_container \
+            --env ALLOWED_EMAILS=owner@example.com \
+            personal-os:ci
+      - name: Check it from the outside, as after a deploy
+        run: python3 backend/scripts/smoke_test.py http://127.0.0.1:8080 --production --release "$GITHUB_SHA" --wait 120
+      - name: Show the server log if it failed
+        if: failure()
+        run: docker logs app
+
   checks:
     name: Security and configuration
     runs-on: ubuntu-24.04
@@ -162,7 +199,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: requirements.txt (what Render installs) matches uv.lock
+      - name: requirements.txt (what the image installs) matches uv.lock
         working-directory: backend
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project --quiet -o "$RUNNER_TEMP/requirements.txt"
@@ -180,7 +217,7 @@ jobs:
 
   deploy:
     name: Deploy to production
-    needs: [backend, frontend, e2e, checks]
+    needs: [backend, frontend, e2e, container, checks]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment:

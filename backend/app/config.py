@@ -1,14 +1,18 @@
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MISSING_DATABASE = (
     "DATABASE_URL is not set, so there is no database to use. Set it to your PostgreSQL "
-    "connection string (for example Neon's) - on Render: your service > Environment; on Vercel: "
-    "Settings > Environment Variables - then deploy again."
+    "connection string (for example Neon's) - on Railway: your service > Variables; on Render: "
+    "your service > Environment; on Vercel: Settings > Environment Variables - then deploy again."
 )
+# Written by the deploy job before uploading the code (Railway's CLI uploads don't carry the
+# commit), so /health can still report which commit is running.
+RELEASE_FILE = Path(__file__).resolve().parents[1] / "RELEASE"
 
 
 def sqlalchemy_url(url: str) -> str:
@@ -73,10 +77,11 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        # Vercel and Render set these in every deployment, so a forgotten APP_ENV can't leave
-        # sign-up open or the API docs visible on the internet.
+        # Railway, Vercel and Render set these in every deployment, so a forgotten APP_ENV
+        # can't leave sign-up open or the API docs visible on the internet.
         return (
             self.app_env == "production"
+            or bool(os.environ.get("RAILWAY_ENVIRONMENT_NAME"))
             or bool(os.environ.get("VERCEL"))
             or bool(os.environ.get("RENDER"))
         )
@@ -93,9 +98,16 @@ class Settings(BaseSettings):
     @property
     def release(self) -> str:
         """The deployed commit, so a deploy can be checked from outside; "dev" on your PC."""
-        for name in ("RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA", "GIT_COMMIT"):
+        for name in (
+            "RAILWAY_GIT_COMMIT_SHA",
+            "RENDER_GIT_COMMIT",
+            "VERCEL_GIT_COMMIT_SHA",
+            "GIT_COMMIT",
+        ):
             if value := os.environ.get(name, "").strip():
                 return value
+        if RELEASE_FILE.is_file() and (value := RELEASE_FILE.read_text().strip()):
+            return value[:64]
         return "dev"
 
     @property

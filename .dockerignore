@@ -1,0 +1,24 @@
+# Only what the image needs: the backend code, the web app's source and the Python requirements.
+.git
+.github
+.vercel
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.coverage
+htmlcov
+backend/.venv
+backend/.devdb
+backend/.env
+backend/tests
+backend/evals
+frontend/node_modules
+frontend/dist
+frontend/e2e
+frontend/tests
+frontend/test-results
+frontend/playwright-report
+api
+docs
+# Top-level documents only; the AI prompts (backend/app/ai/prompts/**/*.md) are needed and kept.
+/*.md
